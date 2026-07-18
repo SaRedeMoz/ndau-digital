@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Ndau Digital — Plataforma de Tradução Colaborativa</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
+
+<!-- ═══ FIREBASE SDK ═══ -->
+<script type="module">
+import { initializeApp }                                    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword,
+         signInWithEmailAndPassword, signOut,
+         onAuthStateChanged, updateProfile }                from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, addDoc,
+         updateDoc, collection, query, where, orderBy,
+         limit, onSnapshot, serverTimestamp,
+         increment, getDocs }                               from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getStorage, ref as sRef, uploadBytes,
+         getDownloadURL }                                   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+
+// ── CONFIGURAÇÃO ── (substitua com as suas credenciais)
+const firebaseConfig = {
+  apiKey:            "SUA_API_KEY",
+  authDomain:        "ndau-digital.firebaseapp.com",
+  projectId:         "ndau-digital",
+  storageBucket:     "ndau-digital.appspot.com",
+  messagingSenderId: "SEU_SENDER_ID",
+  appId:             "SEU_APP_ID"
+};
+
+const app     = initializeApp(firebaseConfig);
+const auth    = getAuth(app);
+const db      = getFirestore(app);
+const storage = getStorage(app);
+
+// ── ESTADO GLOBAL ──
+window.FB    = { auth, db, storage };
+window.FBFNS = {
+  doc, setDoc, getDoc, addDoc, updateDoc,
+  collection, query, where, orderBy, limit,
+  onSnapshot, serverTimestamp, increment, getDocs,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, onAuthStateChanged, updateProfile,
+  sRef, uploadBytes, getDownloadURL
+};
+
+// ── OBSERVAR ESTADO DE AUTH ──
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    const snap = await getDoc(doc(db, "users", user.uid));
+    if (snap.exists()) {
+      window._profile = { uid: user.uid, ...snap.data() };
+      window.onUserReady && window.onUserReady(window._profile);
+    }
+  } else {
+    window._profile = null;
+    window.onUserSignedOut && window.onUserSignedOut();
+  }
+});
+
+// ── ESCUTAR STATS GLOBAIS ──
+onSnapshot(doc(db, "platform_stats", "global"), snap => {
+  if (snap.exists()) {
+    const d = snap.data();
+    const el = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+    el('statWords', (d.totalWords||0).toLocaleString('pt'));
+    el('statVoice', (d.totalVoice||0).toLocaleString('pt'));
+    el('statUsers', (d.totalUsers||0).toLocaleString('pt'));
+    el('statPaid',  (d.totalPaidMT||0).toLocaleString('pt') + ' MT');
+  }
+});
+</script>
+
+<style>
+:root{--bg:#0d0d0b;--surface:#161612;--surface2:#1e1e18;--border:#2a2a22;--gold:#c8a84b;--gold-light:#e8c86b;--earth:#8b5e3c;--green:#4a7c59;--green-light:#6ab87a;--text:#f0ead8;--muted:#7a7460;--danger:#c05a3a;--accent:#d4824a;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");pointer-events:none;z-index:9999;opacity:.4;}
+.geo-bg{position:fixed;top:0;right:0;width:500px;height:500px;background:radial-gradient(circle at 70% 30%,rgba(200,168,75,.06) 0%,transparent 60%);pointer-events:none;z-index:0;}
+nav{position:sticky;top:0;z-index:100;background:rgba(13,13,11,.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 2rem;display:flex;align-items:center;justify-content:space-between;height:64px;}
+.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;color:var(--gold);letter-spacing:-.02em;display:flex;align-items:center;gap:.5rem;cursor:pointer;}
+.logo span{color:var(--text);}
+.logo-icon{width:32px;height:32px;background:linear-gradient(135deg,var(--gold),var(--earth));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;}
+.nav-links{display:flex;gap:.5rem;align-items:center;}
+.nav-btn{padding:.4rem 1rem;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:.85rem;cursor:pointer;transition:all .2s;}
+.nav-btn:hover{color:var(--text);border-color:var(--muted);}
+.nav-btn.primary{background:var(--gold);color:var(--bg);border-color:var(--gold);font-weight:600;}
+.nav-btn.primary:hover{background:var(--gold-light);}
+.view{display:none;animation:fadeIn .4s ease;}
+.view.active{display:block;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.hero{position:relative;z-index:1;padding:6rem 2rem 4rem;max-width:900px;margin:0 auto;text-align:center;}
+.hero-badge{display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .9rem;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.3);border-radius:99px;font-size:.8rem;color:var(--gold);margin-bottom:2rem;letter-spacing:.05em;text-transform:uppercase;}
+h1{font-family:'Syne',sans-serif;font-size:clamp(2.8rem,7vw,5rem);font-weight:800;line-height:1.05;letter-spacing:-.03em;margin-bottom:1.5rem;}
+h1 em{font-style:normal;color:var(--gold);position:relative;}
+h1 em::after{content:'';position:absolute;bottom:-4px;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--gold),transparent);border-radius:2px;}
+.hero-desc{font-size:1.1rem;color:var(--muted);line-height:1.7;max-width:600px;margin:0 auto 3rem;}
+.hero-cta{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;}
+.btn{padding:.75rem 2rem;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.95rem;font-weight:500;cursor:pointer;border:none;transition:all .25s;display:inline-flex;align-items:center;gap:.5rem;}
+.btn-gold{background:linear-gradient(135deg,var(--gold),var(--accent));color:#0d0d0b;font-weight:700;box-shadow:0 4px 20px rgba(200,168,75,.3);}
+.btn-gold:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(200,168,75,.4);}
+.btn-outline{background:transparent;color:var(--text);border:1px solid var(--border);}
+.btn-outline:hover{border-color:var(--gold);color:var(--gold);}
+.stats{position:relative;z-index:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;max-width:900px;margin:0 auto 5rem;}
+.stat-item{background:var(--surface);padding:2rem 1.5rem;text-align:center;}
+.stat-num{font-family:'Syne',sans-serif;font-size:2.2rem;font-weight:800;color:var(--gold);}
+.stat-label{font-size:.8rem;color:var(--muted);margin-top:.3rem;text-transform:uppercase;letter-spacing:.05em;}
+.section{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:0 2rem 5rem;}
+.section-title{font-family:'Syne',sans-serif;font-size:1.8rem;font-weight:700;margin-bottom:.5rem;}
+.section-sub{color:var(--muted);font-size:.9rem;margin-bottom:2.5rem;}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.5rem;}
+.step-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;position:relative;overflow:hidden;transition:border-color .2s;}
+.step-card:hover{border-color:var(--gold);}
+.step-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--gold),transparent);}
+.step-num{font-family:'Syne',sans-serif;font-size:3rem;font-weight:800;color:rgba(200,168,75,.12);line-height:1;margin-bottom:1rem;}
+.step-icon{font-size:1.5rem;margin-bottom:.75rem;}
+.step-title{font-family:'Syne',sans-serif;font-weight:700;margin-bottom:.4rem;}
+.step-desc{font-size:.85rem;color:var(--muted);line-height:1.6;}
+.pay-badge{display:inline-block;margin-top:.75rem;padding:.2rem .6rem;background:rgba(74,124,89,.2);border:1px solid rgba(74,124,89,.4);border-radius:4px;font-size:.75rem;color:var(--green-light);font-weight:600;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(8px);z-index:200;display:none;align-items:center;justify-content:center;padding:1rem;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem;width:100%;max-width:420px;animation:fadeIn .3s ease;position:relative;}
+.modal-title{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:700;margin-bottom:.3rem;}
+.modal-sub{font-size:.85rem;color:var(--muted);margin-bottom:2rem;}
+.form-group{margin-bottom:1.2rem;}
+label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.05em;}
+input,select{width:100%;padding:.7rem 1rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:.9rem;outline:none;transition:border-color .2s;}
+input:focus,select:focus{border-color:var(--gold);}
+select option{background:var(--bg);}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+.btn-full{width:100%;justify-content:center;padding:.85rem;font-size:1rem;}
+.modal-switch{text-align:center;margin-top:1.2rem;font-size:.85rem;color:var(--muted);}
+.modal-switch a{color:var(--gold);cursor:pointer;text-decoration:none;}
+.close-btn{position:absolute;top:1rem;right:1rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--muted);width:30px;height:30px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;}
+.dash-layout{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 64px);}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:1.5rem 1rem;position:sticky;top:64px;height:calc(100vh - 64px);overflow-y:auto;}
+.sidebar-section{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:1.5rem 0 .5rem;}
+.sidebar-item{display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;border-radius:8px;font-size:.88rem;color:var(--muted);cursor:pointer;transition:all .15s;border:none;background:none;width:100%;text-align:left;}
+.sidebar-item:hover{background:var(--surface2);color:var(--text);}
+.sidebar-item.active{background:rgba(200,168,75,.1);color:var(--gold);}
+.sidebar-item .icon{width:18px;text-align:center;}
+.user-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1rem;}
+.user-avatar{width:40px;height:40px;background:linear-gradient(135deg,var(--gold),var(--earth));border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-weight:700;font-size:1.1rem;color:var(--bg);margin-bottom:.6rem;}
+.user-name{font-weight:600;font-size:.9rem;}
+.user-balance{font-size:.78rem;color:var(--green-light);margin-top:.2rem;}
+.dash-content{padding:2rem;overflow-y:auto;}
+.dash-header{margin-bottom:2rem;}
+.dash-header h2{font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:700;}
+.dash-header p{color:var(--muted);font-size:.88rem;margin-top:.3rem;}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:2rem;}
+.metric{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem;position:relative;overflow:hidden;}
+.metric-icon{font-size:1.3rem;margin-bottom:.5rem;}
+.metric-val{font-family:'Syne',sans-serif;font-size:1.7rem;font-weight:700;}
+.metric.gold .metric-val{color:var(--gold);}
+.metric.green .metric-val{color:var(--green-light);}
+.metric.earth .metric-val{color:var(--accent);}
+.metric-label{font-size:.75rem;color:var(--muted);margin-top:.2rem;text-transform:uppercase;letter-spacing:.04em;}
+.translate-panel{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:2rem;}
+.t-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.t-box-header{padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.t-box-lang{font-family:'Syne',sans-serif;font-size:.85rem;font-weight:700;color:var(--gold);}
+.t-box-count{font-size:.75rem;color:var(--muted);}
+textarea{width:100%;background:transparent;border:none;outline:none;padding:1rem;font-family:'DM Sans',sans-serif;font-size:.92rem;color:var(--text);resize:none;min-height:140px;line-height:1.6;}
+textarea::placeholder{color:var(--muted);}
+.t-box-footer{padding:.5rem 1rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:.5rem;}
+.icon-btn{width:30px;height:30px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.85rem;transition:all .15s;}
+.icon-btn:hover{color:var(--gold);border-color:var(--gold);}
+.voice-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:2rem;}
+.voice-title{font-family:'Syne',sans-serif;font-weight:700;margin-bottom:.3rem;display:flex;align-items:center;gap:.5rem;}
+.voice-sub{font-size:.82rem;color:var(--muted);margin-bottom:1.5rem;}
+.voice-controls{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;}
+.record-btn{width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--danger),#e07050);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.2rem;transition:all .2s;box-shadow:0 4px 16px rgba(192,90,58,.4);flex-shrink:0;}
+.record-btn.recording{animation:pulse 1.2s infinite;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(192,90,58,.6)}50%{box-shadow:0 0 0 12px rgba(192,90,58,0)}}
+.waveform{flex:1;height:56px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;gap:2px;padding:0 1rem;min-width:120px;}
+.wave-bar{width:3px;background:var(--gold);border-radius:2px;opacity:.3;transition:height .15s ease;}
+.queue-table{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.queue-header{padding:1rem 1.5rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+.queue-title{font-family:'Syne',sans-serif;font-weight:700;}
+table{width:100%;border-collapse:collapse;}
+th{padding:.7rem 1.5rem;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--border);}
+td{padding:.85rem 1.5rem;font-size:.88rem;border-bottom:1px solid rgba(42,42,34,.5);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(200,168,75,.02);}
+.badge{display:inline-block;padding:.2rem .55rem;border-radius:4px;font-size:.72rem;font-weight:600;letter-spacing:.03em;}
+.badge-pending{background:rgba(200,168,75,.15);color:var(--gold);}
+.badge-validated{background:rgba(74,124,89,.2);color:var(--green-light);}
+.badge-rejected{background:rgba(192,90,58,.2);color:#e07050;}
+.action-btns{display:flex;gap:.4rem;}
+.act-btn{padding:.25rem .6rem;border-radius:4px;font-size:.75rem;cursor:pointer;border:1px solid;font-family:'DM Sans',sans-serif;transition:all .15s;}
+.act-approve{border-color:var(--green);color:var(--green-light);background:rgba(74,124,89,.1);}
+.act-approve:hover{background:rgba(74,124,89,.25);}
+.act-reject{border-color:var(--danger);color:#e07050;background:rgba(192,90,58,.1);}
+.act-reject:hover{background:rgba(192,90,58,.25);}
+.earnings-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;}
+.earning-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;}
+.earning-card h3{font-family:'Syne',sans-serif;font-weight:700;margin-bottom:.4rem;font-size:1rem;}
+.earning-big{font-family:'Syne',sans-serif;font-size:2.5rem;font-weight:800;color:var(--gold);margin:.5rem 0;}
+.earning-sub{font-size:.8rem;color:var(--muted);}
+.withdraw-methods{display:flex;gap:.75rem;margin-top:1.5rem;flex-wrap:wrap;}
+.method-btn{flex:1;min-width:100px;padding:.6rem;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;text-align:center;transition:all .2s;}
+.method-btn:hover{border-color:var(--gold);color:var(--gold);}
+.method-icon{font-size:1.2rem;margin-bottom:.25rem;}
+.progress-bar{height:6px;background:var(--surface2);border-radius:3px;margin:.5rem 0;overflow:hidden;}
+.progress-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--gold),var(--accent));}
+.progress-label{display:flex;justify-content:space-between;font-size:.75rem;color:var(--muted);}
+#toast{position:fixed;bottom:2rem;right:2rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.9rem 1.4rem;font-size:.88rem;z-index:9000;transform:translateY(100px);opacity:0;transition:all .3s ease;display:flex;align-items:center;gap:.6rem;max-width:320px;}
+#toast.show{transform:translateY(0);opacity:1;}
+#toast.success{border-color:var(--green);}
+#toast.error{border-color:var(--danger);}
+.divider{border:none;border-top:1px solid var(--border);margin:1.5rem 0;}
+.dash-tab{display:none;}
+.dash-tab.active{display:block;}
+.word-chip{display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .6rem;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.25);border-radius:4px;font-size:.75rem;color:var(--gold);}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(200,168,75,.3);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;margin-right:.4rem;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.fb-badge{display:inline-flex;align-items:center;gap:.3rem;padding:.15rem .5rem;background:rgba(255,160,0,.1);border:1px solid rgba(255,160,0,.3);border-radius:4px;font-size:.7rem;color:#ffa000;}
+@media(max-width:720px){.dash-layout{grid-template-columns:1fr}.sidebar{display:none}.translate-panel{grid-template-columns:1fr}.earnings-grid{grid-template-columns:1fr}.form-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="geo-bg"></div>
+<div id="toast"><span id="toastIcon">✓</span> <span id="toastMsg"></span></div>
+
+<!-- NAV -->
+<nav>
+  <div class="logo" onclick="showView('home')">
+    <div class="logo-icon">🌍</div>
+    Ndau<span>Digital</span>
+  </div>
+  <div class="nav-links" id="navLinks">
+    <button class="nav-btn" onclick="showView('home')">Início</button>
+    <button class="nav-btn" onclick="openModal('login')">Entrar</button>
+    <button class="nav-btn primary" onclick="openModal('register')">Criar Conta</button>
+  </div>
+</nav>
+
+<!-- ═══ HOME ═══ -->
+<div class="view active" id="view-home">
+  <section class="hero">
+    <div class="hero-badge">🌿 Língua Ndau • Moçambique & Zimbábue</div>
+    <h1>Preservar &amp; Digitalizar<br/><em>a Língua Ndau</em></h1>
+    <p class="hero-desc">Plataforma colaborativa para traduzir, gravar e expandir o uso da língua Ndau em tecnologias digitais — Google, aplicativos, voice-over. Cada contribuição validada é remunerada.</p>
+    <div class="hero-cta">
+      <button class="btn btn-gold" onclick="openModal('register')">🚀 Começar a Traduzir</button>
+      <button class="btn btn-outline" onclick="openModal('login')">Já tenho conta →</button>
+    </div>
+  </section>
+  <div class="stats">
+    <div class="stat-item"><div class="stat-num" id="statWords">—</div><div class="stat-label">Palavras Traduzidas</div></div>
+    <div class="stat-item"><div class="stat-num" id="statVoice">—</div><div class="stat-label">Gravações de Voz</div></div>
+    <div class="stat-item"><div class="stat-num" id="statUsers">—</div><div class="stat-label">Tradutores Activos</div></div>
+    <div class="stat-item"><div class="stat-num" id="statPaid">—</div><div class="stat-label">Total Pago (MT)</div></div>
+  </div>
+  <section class="section">
+    <div class="section-title">Como Funciona</div>
+    <div class="section-sub">Simples, justo e impactante</div>
+    <div class="steps">
+      <div class="step-card"><div class="step-num">01</div><div class="step-icon">📝</div><div class="step-title">Traduz Texto</div><div class="step-desc">Traduza do Português/Inglês para Ndau. Cada 10 palavras validadas vale remuneração.</div><span class="pay-badge">5 MT / 10 palavras</span></div>
+      <div class="step-card"><div class="step-num">02</div><div class="step-icon">🎙️</div><div class="step-title">Grava em Voz</div><div class="step-desc">Grave a pronúncia correcta. Essencial para TTS e assistentes de voz em Ndau.</div><span class="pay-badge">10 MT / 10 gravações</span></div>
+      <div class="step-card"><div class="step-num">03</div><div class="step-icon">✅</div><div class="step-title">Validação</div><div class="step-desc">Falantes nativos validam as contribuições. Só após 2 validações o pagamento é confirmado.</div><span class="pay-badge">Sistema de revisão</span></div>
+      <div class="step-card"><div class="step-num">04</div><div class="step-icon">💰</div><div class="step-title">Recebe Pagamento</div><div class="step-desc">Levante os seus ganhos via M-Pesa, E-Mola ou transferência bancária.</div><span class="pay-badge">M-Pesa · E-Mola · Banco</span></div>
+    </div>
+  </section>
+  <section class="section">
+    <div class="section-title">Impacto Digital</div>
+    <div class="section-sub">Para onde vai a língua Ndau digitalizada</div>
+    <div class="steps">
+      <div class="step-card"><div class="step-icon">🔍</div><div class="step-title">Google Translate</div><div class="step-desc">Dados submetidos para que Ndau passe a ser língua suportada no Google.</div></div>
+      <div class="step-card"><div class="step-icon">🔊</div><div class="step-title">Voice Over & TTS</div><div class="step-desc">Gravações treinam modelos de síntese de voz para leitores de ecrã em Ndau.</div></div>
+      <div class="step-card"><div class="step-icon">📱</div><div class="step-title">Apps & Android</div><div class="step-desc">Dicionários, teclados e aplicativos educativos em Ndau para Android e iOS.</div></div>
+      <div class="step-card"><div class="step-icon">🏛️</div><div class="step-title">Entidades Oficiais</div><div class="step-desc">Documentação partilhada com o Ministério da Educação, universidades e institutos.</div></div>
+    </div>
+  </section>
+</div>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div class="view" id="view-dashboard">
+  <div class="dash-layout">
+    <aside class="sidebar">
+      <div class="user-card">
+        <div class="user-avatar" id="sidebarAvatar">T</div>
+        <div class="user-name" id="sidebarName">Tradutor</div>
+        <div class="user-balance" id="sidebarBalance">💰 0 MT</div>
+        <div style="margin-top:.4rem;"><span class="fb-badge">🔥 Firebase</span></div>
+      </div>
+      <div class="sidebar-section">Principal</div>
+      <button class="sidebar-item active" onclick="switchTab('overview',this)"><span class="icon">📊</span>Visão Geral</button>
+      <button class="sidebar-item" onclick="switchTab('translate',this)"><span class="icon">📝</span>Traduzir Texto</button>
+      <button class="sidebar-item" onclick="switchTab('voice',this)"><span class="icon">🎙️</span>Gravar Voz</button>
+      <button class="sidebar-item" onclick="switchTab('validate',this)"><span class="icon">✅</span>Validar</button>
+      <div class="sidebar-section">Conta</div>
+      <button class="sidebar-item" onclick="switchTab('earnings',this)"><span class="icon">💰</span>Ganhos & Levante</button>
+      <button class="sidebar-item" onclick="switchTab('history',this)"><span class="icon">📋</span>Histórico</button>
+      <div style="height:2rem;"></div>
+      <button class="sidebar-item" onclick="doLogout()"><span class="icon">🚪</span>Sair</button>
+    </aside>
+    <main class="dash-content">
+
+      <!-- OVERVIEW -->
+      <div class="dash-tab active" id="tab-overview">
+        <div class="dash-header"><h2>Bem-vindo, <span id="dashName">Tradutor</span> 👋</h2><p>Contribua para o futuro digital da língua Ndau</p></div>
+        <div class="metrics">
+          <div class="metric gold"><div class="metric-icon">📝</div><div class="metric-val" id="mWords">0</div><div class="metric-label">Palavras</div></div>
+          <div class="metric green"><div class="metric-icon">🎙️</div><div class="metric-val" id="mVoice">0</div><div class="metric-label">Gravações</div></div>
+          <div class="metric earth"><div class="metric-icon">💰</div><div class="metric-val" id="mEarned">0 MT</div><div class="metric-label">Total Ganho</div></div>
+          <div class="metric gold"><div class="metric-icon">⏳</div><div class="metric-val" id="mPending">0 MT</div><div class="metric-label">Pendente</div></div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;margin-bottom:1rem;">Progresso para Próximo Pagamento</div>
+          <div class="progress-label"><span>Texto: <span id="pgW">0</span>/10 palavras</span><span id="pgWp">0%</span></div>
+          <div class="progress-bar"><div class="progress-fill" id="pgWbar" style="width:0%"></div></div>
+          <div style="height:.75rem;"></div>
+          <div class="progress-label"><span>Voz: <span id="pgV">0</span>/10 gravações</span><span id="pgVp">0%</span></div>
+          <div class="progress-bar"><div class="progress-fill" id="pgVbar" style="width:0%;background:linear-gradient(90deg,#c05a3a,#e07050)"></div></div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;margin-bottom:.5rem;">🚀 Atalho Rápido</div>
+          <div style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">Comece a contribuir agora</div>
+          <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+            <button class="btn btn-gold" onclick="switchTab('translate',null)">📝 Traduzir</button>
+            <button class="btn btn-outline" onclick="switchTab('voice',null)">🎙️ Gravar Voz</button>
+            <button class="btn btn-outline" onclick="switchTab('validate',null)">✅ Validar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRANSLATE -->
+      <div class="dash-tab" id="tab-translate">
+        <div class="dash-header"><h2>Traduzir Texto</h2><p>5 MT por cada 10 palavras validadas — guardado no Firebase</p></div>
+        <div style="display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center;">
+          <div><label>Língua de Origem</label>
+            <select id="srcLang" style="width:160px;" onchange="updateSrcLabel()">
+              <option value="pt">🇵🇹 Português</option>
+              <option value="en">🇬🇧 Inglês</option>
+              <option value="sn">🇿🇼 Shona</option>
+            </select>
+          </div>
+          <div style="color:var(--muted);margin-top:1.2rem;font-size:1.2rem;">→</div>
+          <div><label>Destino</label><select style="width:160px;" disabled><option>🌍 Ndau</option></select></div>
+          <div style="margin-top:1.2rem;"><span class="word-chip" id="wChip">0 palavras</span></div>
+        </div>
+        <div class="translate-panel">
+          <div class="t-box">
+            <div class="t-box-header"><span class="t-box-lang" id="srcLabel">🇵🇹 Português</span><span class="t-box-count" id="srcCnt">0 palavras</span></div>
+            <textarea id="srcTxt" placeholder="Escreva o texto aqui..." oninput="countW()"></textarea>
+            <div class="t-box-footer"><button class="icon-btn" onclick="clearT()">🗑️</button></div>
+          </div>
+          <div class="t-box">
+            <div class="t-box-header"><span class="t-box-lang">🌍 Ndau</span><span class="t-box-count" id="ndauCnt">0 palavras</span></div>
+            <textarea id="ndauTxt" placeholder="Tradução em Ndau..." oninput="countNW()"></textarea>
+            <div class="t-box-footer"><button class="icon-btn" onclick="cpyNdau()">📋</button></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-gold" id="submitTBtn" onclick="submitTrans()">✅ Submeter ao Firebase</button>
+          <span style="font-size:.82rem;color:var(--muted);">Guardado em Firestore e enviado para validação</span>
+        </div>
+        <hr class="divider"/>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;margin-bottom:1rem;">📋 Frases Sugeridas</div>
+        <div id="phraseList"></div>
+      </div>
+
+      <!-- VOICE -->
+      <div class="dash-tab" id="tab-voice">
+        <div class="dash-header"><h2>Gravar Voz em Ndau</h2><p>10 MT por cada 10 gravações validadas — áudio guardado no Firebase Storage</p></div>
+        <div class="voice-panel">
+          <div class="voice-title">🎙️ Nova Gravação</div>
+          <div class="voice-sub">O áudio será enviado para Firebase Storage automaticamente</div>
+          <div style="margin-bottom:1.5rem;">
+            <label>Palavra Ndau</label>
+            <input type="text" id="vWord" placeholder="Ex: Musha (casa)..." style="max-width:400px;"/>
+            <input type="text" id="vMeaning" placeholder="Significado em Português..." style="max-width:400px;margin-top:.5rem;"/>
+          </div>
+          <div class="voice-controls">
+            <button class="record-btn" id="recBtn" onclick="toggleRec()">🎤</button>
+            <div class="waveform" id="waveDiv">
+              <div class="wave-bar" style="height:8px"></div><div class="wave-bar" style="height:20px"></div>
+              <div class="wave-bar" style="height:12px"></div><div class="wave-bar" style="height:30px"></div>
+              <div class="wave-bar" style="height:16px"></div><div class="wave-bar" style="height:24px"></div>
+              <div class="wave-bar" style="height:10px"></div><div class="wave-bar" style="height:28px"></div>
+              <div class="wave-bar" style="height:14px"></div><div class="wave-bar" style="height:20px"></div>
+              <div class="wave-bar" style="height:8px"></div><div class="wave-bar" style="height:16px"></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:.5rem;">
+              <span style="font-size:.82rem;color:var(--muted);" id="recStatus">Pronto para gravar</span>
+              <button class="btn btn-outline" id="sendVBtn" style="display:none;font-size:.82rem;padding:.4rem .8rem;" onclick="sendVoice()">☁️ Enviar para Firebase</button>
+            </div>
+          </div>
+        </div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;margin-bottom:1rem;">📋 Palavras para Gravar</div>
+        <div id="vWordList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;"></div>
+      </div>
+
+      <!-- VALIDATE -->
+      <div class="dash-tab" id="tab-validate">
+        <div class="dash-header"><h2>Validar Contribuições</h2><p>Reveja traduções de outros — valida ou rejeita, actualizado em tempo real</p></div>
+        <div class="queue-table">
+          <div class="queue-header"><span class="queue-title">Fila de Validação</span><span class="word-chip" id="qCnt">A carregar...</span></div>
+          <table><thead><tr><th>Original</th><th>Tradução Ndau</th><th>Tipo</th><th>Tradutor</th><th>Acção</th></tr></thead>
+          <tbody id="vQueue"></tbody></table>
+        </div>
+      </div>
+
+      <!-- EARNINGS -->
+      <div class="dash-tab" id="tab-earnings">
+        <div class="dash-header"><h2>Ganhos & Levante</h2><p>Saldo actualizado em tempo real via Firebase</p></div>
+        <div class="earnings-grid">
+          <div class="earning-card">
+            <h3>💰 Saldo Disponível</h3>
+            <div class="earning-big" id="eBal">0 MT</div>
+            <div class="earning-sub">Pronto para levantar</div>
+            <div class="withdraw-methods">
+              <button class="method-btn" onclick="doWithdraw('mpesa')"><div class="method-icon">📱</div>M-Pesa</button>
+              <button class="method-btn" onclick="doWithdraw('emola')"><div class="method-icon">💳</div>E-Mola</button>
+              <button class="method-btn" onclick="doWithdraw('bank')"><div class="method-icon">🏦</div>Banco</button>
+            </div>
+          </div>
+          <div class="earning-card">
+            <h3>⏳ Pendente Validação</h3>
+            <div class="earning-big" id="ePend" style="color:var(--accent);">0 MT</div>
+            <div class="earning-sub">Aguarda revisão de outros</div>
+            <hr class="divider"/>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.5rem;">
+              <div><div style="font-size:.75rem;color:var(--muted);">DE TEXTO</div><div style="font-family:'Syne',sans-serif;font-weight:700;color:var(--gold);" id="eTxt">0 MT</div></div>
+              <div><div style="font-size:.75rem;color:var(--muted);">DE VOZ</div><div style="font-family:'Syne',sans-serif;font-weight:700;color:var(--accent);" id="eVoi">0 MT</div></div>
+            </div>
+          </div>
+          <div class="earning-card" style="grid-column:1/-1;">
+            <h3>📊 Estatísticas</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1rem;margin-top:1rem;">
+              <div style="text-align:center;"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:700;color:var(--gold);" id="sW">0</div><div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;">Palavras</div></div>
+              <div style="text-align:center;"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:700;color:var(--accent);" id="sV">0</div><div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;">Gravações</div></div>
+              <div style="text-align:center;"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:700;" id="sE">0 MT</div><div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;">Total Ganho</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- HISTORY -->
+      <div class="dash-tab" id="tab-history">
+        <div class="dash-header"><h2>Histórico</h2><p>Todas as suas contribuições guardadas no Firebase</p></div>
+        <div class="queue-table">
+          <div class="queue-header"><span class="queue-title">Contribuições</span></div>
+          <table><thead><tr><th>Data</th><th>Conteúdo</th><th>Tipo</th><th>Estado</th><th>Ganho</th></tr></thead>
+          <tbody id="histTbl"></tbody></table>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- AUTH MODAL -->
+<div class="modal-overlay" id="authModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal()">✕</button>
+    <div id="loginF">
+      <div class="modal-title">Entrar</div>
+      <div class="modal-sub">Bem-vindo de volta à plataforma Ndau Digital</div>
+      <div class="form-group"><label>Email</label><input type="email" id="lEmail" placeholder="email@exemplo.com"/></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="lPass" placeholder="••••••••"/></div>
+      <button class="btn btn-gold btn-full" id="lBtn" onclick="doLogin()">Entrar →</button>
+      <div class="modal-switch">Não tem conta? <a onclick="toggleAuth('register')">Criar conta</a></div>
+    </div>
+    <div id="registerF" style="display:none;">
+      <div class="modal-title">Criar Conta</div>
+      <div class="modal-sub">Junte-se à comunidade de preservação do Ndau</div>
+      <div class="form-row">
+        <div class="form-group"><label>Nome</label><input type="text" id="rName" placeholder="Seu nome"/></div>
+        <div class="form-group"><label>Apelido</label><input type="text" id="rSurname" placeholder="Apelido"/></div>
+      </div>
+      <div class="form-group"><label>Email</label><input type="email" id="rEmail" placeholder="email@exemplo.com"/></div>
+      <div class="form-group"><label>Telefone (M-Pesa/E-Mola)</label><input type="tel" id="rPhone" placeholder="+258 8X XXX XXXX"/></div>
+      <div class="form-group"><label>Nível de Ndau</label>
+        <select id="rLevel"><option value="native">Falante Nativo</option><option value="fluent">Fluente</option><option value="intermediate">Intermédio</option><option value="learner">Aprendiz</option></select>
+      </div>
+      <div class="form-group"><label>Senha</label><input type="password" id="rPass" placeholder="Mínimo 8 caracteres"/></div>
+      <button class="btn btn-gold btn-full" id="rBtn" onclick="doRegister()">Criar Conta →</button>
+      <div class="modal-switch">Já tem conta? <a onclick="toggleAuth('login')">Entrar</a></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── PHRASES & WORDS ──
+const PHRASES=[{pt:"Bom dia, como está?",en:"Good morning, how are you?"},{pt:"A água é vida.",en:"Water is life."},{pt:"A minha família é grande.",en:"My family is big."},{pt:"O fogo aquece a casa.",en:"Fire warms the house."},{pt:"Vou à escola amanhã.",en:"I'm going to school tomorrow."}];
+const WORDS=[{word:"Musha",meaning:"Casa"},{word:"Moto",meaning:"Fogo"},{word:"Mvura",meaning:"Água"},{word:"Munda",meaning:"Campo"},{word:"Zuva",meaning:"Sol / Dia"},{word:"Usiku",meaning:"Noite"},{word:"Mwana",meaning:"Criança"},{word:"Baba",meaning:"Pai"},{word:"Amai",meaning:"Mãe"},{word:"Nzira",meaning:"Caminho"},{word:"Gomo",meaning:"Montanha"},{word:"Rwizi",meaning:"Rio"}];
+
+// ── STATE ──
+let profile=null, recInterval=null, isRec=false, audioChunks=[], mediaRec=null, audioBlob=null;
+
+// ── VIEWS & TABS ──
+function showView(n){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById('view-'+n).classList.add('active');}
+function switchTab(n,btn){document.querySelectorAll('.dash-tab').forEach(t=>t.classList.remove('active'));document.getElementById('tab-'+n).classList.add('active');if(btn){document.querySelectorAll('.sidebar-item').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}showView('dashboard');}
+
+// ── AUTH MODAL ──
+function openModal(t){document.getElementById('authModal').classList.add('open');toggleAuth(t);}
+function closeModal(){document.getElementById('authModal').classList.remove('open');}
+function toggleAuth(t){document.getElementById('loginF').style.display=t==='login'?'block':'none';document.getElementById('registerF').style.display=t==='register'?'block':'none';}
+
+// ── FIREBASE AUTH ──
+async function doLogin(){
+  const email=document.getElementById('lEmail').value.trim();
+  const pass=document.getElementById('lPass').value;
+  if(!email||!pass){showToast('Preencha todos os campos','error');return;}
+  setBtnLoading('lBtn',true);
+  try{
+    const{signInWithEmailAndPassword,auth}=getFB();
+    await signInWithEmailAndPassword(auth,email,pass);
+  }catch(e){showToast('Erro: '+e.message,'error');}
+  setBtnLoading('lBtn',false);
+}
+
+async function doRegister(){
+  const name=document.getElementById('rName').value.trim();
+  const surname=document.getElementById('rSurname').value.trim();
+  const email=document.getElementById('rEmail').value.trim();
+  const phone=document.getElementById('rPhone').value.trim();
+  const ndauLevel=document.getElementById('rLevel').value;
+  const pass=document.getElementById('rPass').value;
+  if(!name||!email||!pass){showToast('Preencha os campos obrigatórios','error');return;}
+  setBtnLoading('rBtn',true);
+  try{
+    const{createUserWithEmailAndPassword,updateProfile,auth,db,doc,setDoc,serverTimestamp,increment,updateDoc}=getFB();
+    const cred=await createUserWithEmailAndPassword(auth,email,pass);
+    await updateProfile(cred.user,{displayName:name+' '+surname});
+    await setDoc(doc(db,'users',cred.user.uid),{name:name+' '+surname,email,phone,ndauLevel,totalWords:0,totalVoice:0,pendingMT:0,earnedMT:0,withdrawnMT:0,createdAt:serverTimestamp(),lastActive:serverTimestamp()});
+    try{await updateDoc(doc(db,'platform_stats','global'),{totalUsers:increment(1)});}catch(e){}
+    showToast('Conta criada! Bem-vindo(a) '+name,'success');
+  }catch(e){showToast('Erro: '+e.message,'error');}
+  setBtnLoading('rBtn',false);
+}
+
+async function doLogout(){
+  const{signOut,auth}=getFB();
+  await signOut(auth);
+  profile=null; showView('home');
+  document.getElementById('navLinks').innerHTML=`<button class="nav-btn" onclick="showView('home')">Início</button><button class="nav-btn" onclick="openModal('login')">Entrar</button><button class="nav-btn primary" onclick="openModal('register')">Criar Conta</button>`;
+  showToast('Sessão terminada','success');
+}
+
+function getFB(){return{auth:window.FB.auth,db:window.FB.db,storage:window.FB.storage,...window.FBFNS};}
+
+// ── ON USER READY (Firebase callback) ──
+window.onUserReady=function(p){
+  profile=p; closeModal();
+  document.getElementById('sidebarAvatar').textContent=(p.name||'T')[0].toUpperCase();
+  document.getElementById('sidebarName').textContent=p.name||'Tradutor';
+  document.getElementById('dashName').textContent=(p.name||'Tradutor').split(' ')[0];
+  updateMetrics(p);
+  showView('dashboard');
+  loadPhrases(); loadVoiceWords(); loadValidateQueue(); loadHistory();
+  watchProfile();
+  showToast('Bem-vindo(a), '+(p.name||'').split(' ')[0]+'!','success');
+  document.getElementById('navLinks').innerHTML=`<span style="font-size:.85rem;color:var(--muted);padding:0 .5rem;">${p.name}</span><button class="nav-btn primary" onclick="switchTab('earnings',null)">💰 Ganhos</button><button class="nav-btn" onclick="doLogout()">Sair</button>`;
+};
+window.onUserSignedOut=function(){showView('home');};
+
+function watchProfile(){
+  const{onSnapshot,doc,db}=getFB();
+  onSnapshot(doc(db,'users',profile.uid),snap=>{
+    if(snap.exists()){profile={uid:snap.id,...snap.data()};updateMetrics(profile);}
+  });
+}
+
+function updateMetrics(p){
+  if(!p)return;
+  const e=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  e('mWords',p.totalWords||0);e('mVoice',p.totalVoice||0);
+  e('mEarned',(p.earnedMT||0)+' MT');e('mPending',(p.pendingMT||0)+' MT');
+  e('sidebarBalance','💰 '+(p.earnedMT||0)+' MT');
+  e('eBal',(p.earnedMT||0)+' MT');e('ePend',(p.pendingMT||0)+' MT');
+  e('eTxt',Math.floor((p.totalWords||0)/10)*5+' MT');
+  e('eVoi',Math.floor((p.totalVoice||0)/10)*10+' MT');
+  e('sW',p.totalWords||0);e('sV',p.totalVoice||0);e('sE',(p.earnedMT||0)+' MT');
+  const wp=((p.totalWords||0)%10)/10*100;const vp=((p.totalVoice||0)%10)/10*100;
+  e('pgW',(p.totalWords||0)%10);e('pgWp',Math.round(wp)+'%');
+  document.getElementById('pgWbar')&&(document.getElementById('pgWbar').style.width=wp+'%');
+  e('pgV',(p.totalVoice||0)%10);e('pgVp',Math.round(vp)+'%');
+  document.getElementById('pgVbar')&&(document.getElementById('pgVbar').style.width=vp+'%');
+}
+
+// ── TRANSLATE ──
+function countW(){const t=document.getElementById('srcTxt').value.trim();const c=t?t.split(/\s+/).filter(Boolean).length:0;document.getElementById('srcCnt').textContent=c+' palavras';document.getElementById('wChip').textContent=c+' palavras';}
+function countNW(){const t=document.getElementById('ndauTxt').value.trim();const c=t?t.split(/\s+/).filter(Boolean).length:0;document.getElementById('ndauCnt').textContent=c+' palavras';}
+function clearT(){document.getElementById('srcTxt').value='';document.getElementById('ndauTxt').value='';countW();countNW();}
+function cpyNdau(){const t=document.getElementById('ndauTxt').value;if(!t)return;navigator.clipboard.writeText(t).then(()=>showToast('Copiado!','success'));}
+function updateSrcLabel(){const l={pt:'🇵🇹 Português',en:'🇬🇧 Inglês',sn:'🇿🇼 Shona'};document.getElementById('srcLabel').textContent=l[document.getElementById('srcLang').value];}
+
+async function submitTrans(){
+  if(!profile){showToast('Sessão expirada','error');return;}
+  const src=document.getElementById('srcTxt').value.trim();
+  const ndau=document.getElementById('ndauTxt').value.trim();
+  if(!src||!ndau){showToast('Preencha ambas as caixas','error');return;}
+  const wc=ndau.split(/\s+/).filter(Boolean).length;
+  const pmt=Math.floor(wc/10)*5;
+  setBtnLoading('submitTBtn',true);
+  try{
+    const{addDoc,collection,db,serverTimestamp,updateDoc,doc,increment}=getFB();
+    await addDoc(collection(db,'translations'),{userId:profile.uid,userName:profile.name,sourceLang:document.getElementById('srcLang').value,sourceText:src,ndauText:ndau,wordCount:wc,status:'pending',earnedMT:0,validatedBy:[],rejectedBy:[],type:'text',createdAt:serverTimestamp()});
+    await updateDoc(doc(db,'users',profile.uid),{totalWords:increment(wc),pendingMT:increment(pmt)});
+    clearT(); showToast(`✅ Submetido! ${wc} palavras (+${pmt} MT pendente)`,'success');
+  }catch(e){showToast('Erro Firebase: '+e.message,'error');}
+  setBtnLoading('submitTBtn',false);
+}
+
+// ── VOICE ──
+async function toggleRec(){
+  const word=document.getElementById('vWord').value.trim();
+  if(!word){showToast('Escreva a palavra Ndau','error');return;}
+  isRec=!isRec;
+  const btn=document.getElementById('recBtn');
+  if(isRec){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      mediaRec=new MediaRecorder(stream);audioChunks=[];
+      mediaRec.ondataavailable=e=>audioChunks.push(e.data);
+      mediaRec.onstop=()=>{audioBlob=new Blob(audioChunks,{type:'audio/webm'});document.getElementById('sendVBtn').style.display='inline-flex';};
+      mediaRec.start();
+      btn.classList.add('recording');btn.textContent='⏹️';
+      document.getElementById('recStatus').textContent='🔴 A gravar...';
+      animWave(true);
+    }catch(e){showToast('Microfone não disponível','error');isRec=false;}
+  }else{
+    if(mediaRec&&mediaRec.state!=='inactive'){mediaRec.stop();mediaRec.stream.getTracks().forEach(t=>t.stop());}
+    btn.classList.remove('recording');btn.textContent='🎤';
+    document.getElementById('recStatus').textContent='✅ Gravação pronta';
+    animWave(false);
+  }
+}
+
+async function sendVoice(){
+  if(!audioBlob||!profile){return;}
+  const word=document.getElementById('vWord').value.trim();
+  const meaning=document.getElementById('vMeaning').value.trim();
+  setBtnLoading('sendVBtn',true);
+  try{
+    const{sRef,uploadBytes,getDownloadURL,storage,addDoc,collection,db,serverTimestamp,updateDoc,doc,increment}=getFB();
+    const r=sRef(storage,`recordings/${profile.uid}/${Date.now()}_${word}.webm`);
+    const snap=await uploadBytes(r,audioBlob);
+    const url=await getDownloadURL(snap.ref);
+    await addDoc(collection(db,'recordings'),{userId:profile.uid,userName:profile.name,word,meaning,audioUrl:url,status:'pending',earnedMT:0,validatedBy:[],type:'voice',createdAt:serverTimestamp()});
+    await updateDoc(doc(db,'users',profile.uid),{totalVoice:increment(1),pendingMT:increment(1)});
+    document.getElementById('vWord').value='';document.getElementById('vMeaning').value='';
+    document.getElementById('sendVBtn').style.display='none';
+    document.getElementById('recStatus').textContent='Pronto para gravar';
+    audioBlob=null;
+    showToast('🎙️ Enviado para Firebase Storage! "'+word+'"','success');
+  }catch(e){showToast('Erro: '+e.message,'error');}
+  setBtnLoading('sendVBtn',false);
+}
+
+function animWave(active){
+  const bars=document.querySelectorAll('.wave-bar');
+  if(active){recInterval=setInterval(()=>{bars.forEach(b=>{b.style.height=(Math.random()*32+6)+'px';b.style.opacity=(Math.random()*.6+.4).toString();});},100);}
+  else{clearInterval(recInterval);const h=[8,20,12,30,16,24,10,28,14,20,8,16];bars.forEach((b,i)=>{b.style.height=(h[i]||12)+'px';b.style.opacity='.3';});}
+}
+
+// ── VALIDATE QUEUE (tempo real) ──
+function loadValidateQueue(){
+  if(!profile)return;
+  const{query,collection,where,orderBy,limit,onSnapshot,db,updateDoc,doc,increment,arrayUnion}=getFB();
+  const q=query(collection(db,'translations'),where('status','==','pending'),limit(20));
+  onSnapshot(q,snap=>{
+    const rows=snap.docs.filter(d=>d.data().userId!==profile.uid);
+    document.getElementById('qCnt').textContent=rows.length+' pendentes';
+    document.getElementById('vQueue').innerHTML=rows.length===0
+      ?'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">Nenhuma tradução pendente para validar</td></tr>'
+      :rows.map(d=>{const t=d.data();return`<tr>
+        <td>${(t.sourceText||'').substring(0,30)}...</td>
+        <td style="color:var(--gold);font-weight:500;">${(t.ndauText||'').substring(0,30)}</td>
+        <td><span class="badge badge-pending">${t.type==='voice'?'Voz':'Texto'}</span></td>
+        <td style="color:var(--muted);">${t.userName||'—'}</td>
+        <td><div class="action-btns">
+          <button class="act-btn act-approve" onclick="valItem('${d.id}','approve',this)">✓ Validar</button>
+          <button class="act-btn act-reject" onclick="valItem('${d.id}','reject',this)">✕ Rejeitar</button>
+        </div></td></tr>`;}).join('');
+  });
+}
+
+async function valItem(id,action,btn){
+  const{updateDoc,doc,db,arrayUnion,increment}=getFB();
+  const field=action==='approve'?'validatedBy':'rejectedBy';
+  try{
+    await updateDoc(doc(db,'translations',id),{[field]:arrayUnion(profile.uid)});
+    const row=btn.closest('tr');
+    row.cells[4].innerHTML=action==='approve'?'<span class="badge badge-validated">Validado ✓</span>':'<span class="badge badge-rejected">Rejeitado</span>';
+    showToast(action==='approve'?'Contribuição validada! ✓':'Contribuição rejeitada.', action==='approve'?'success':'error');
+  }catch(e){showToast('Erro: '+e.message,'error');}
+}
+
+// ── WITHDRAW ──
+async function doWithdraw(method){
+  if(!profile||!(profile.earnedMT>0)){showToast('Saldo insuficiente','error');return;}
+  const phone=profile.phone||prompt('Número de '+method+':');
+  if(!phone)return;
+  try{
+    const{addDoc,collection,db,serverTimestamp,updateDoc,doc,increment}=getFB();
+    await addDoc(collection(db,'withdrawals'),{userId:profile.uid,amount:profile.earnedMT,method,phoneNumber:phone,status:'pending',reference:'NDW-'+Date.now(),createdAt:serverTimestamp()});
+    await updateDoc(doc(db,'users',profile.uid),{earnedMT:increment(-profile.earnedMT),withdrawnMT:increment(profile.earnedMT)});
+    showToast('💰 Pedido de levantamento via '+method+' enviado!','success');
+  }catch(e){showToast('Erro: '+e.message,'error');}
+}
+
+// ── HISTORY ──
+async function loadHistory(){
+  if(!profile)return;
+  const{query,collection,where,orderBy,limit,getDocs,db}=getFB();
+  try{
+    const q=query(collection(db,'translations'),where('userId','==',profile.uid),orderBy('createdAt','desc'),limit(30));
+    const snap=await getDocs(q);
+    const tbody=document.getElementById('histTbl');
+    if(snap.empty){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">Ainda sem contribuições. Comece agora!</td></tr>';return;}
+    tbody.innerHTML=snap.docs.map(d=>{const t=d.data();const dt=t.createdAt?.toDate?.()?.toLocaleDateString('pt-MZ')||'—';return`<tr><td style="color:var(--muted);font-size:.8rem;">${dt}</td><td>${(t.sourceText||'').substring(0,35)}...</td><td><span class="badge badge-pending">${t.type==='voice'?'Voz':'Texto'}</span></td><td><span class="badge badge-${t.status==='validated'?'validated':t.status==='rejected'?'rejected':'pending'}">${t.status==='validated'?'Validado':t.status==='rejected'?'Rejeitado':'Pendente'}</span></td><td style="color:var(--green-light);">${t.earnedMT>0?t.earnedMT+' MT':'—'}</td></tr>`;}).join('');
+  }catch(e){console.error(e);}
+}
+
+// ── PHRASES & WORDS UI ──
+function loadPhrases(){
+  document.getElementById('phraseList').innerHTML=PHRASES.map((p,i)=>`<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem;"><div style="flex:1;min-width:200px;"><div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.2rem;">Português</div><div style="font-size:.9rem;">${p.pt}</div></div><button class="btn btn-outline" style="font-size:.8rem;padding:.4rem .9rem;" onclick="usePhr(${i})">Usar →</button></div>`).join('');
+}
+function usePhr(i){document.getElementById('srcTxt').value=PHRASES[i].pt;countW();switchTab('translate',null);}
+function loadVoiceWords(){document.getElementById('vWordList').innerHTML=WORDS.map(w=>`<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;cursor:pointer;transition:border-color .2s;" onmouseenter="this.style.borderColor='var(--gold)'" onmouseleave="this.style.borderColor='var(--border)'" onclick="document.getElementById('vWord').value='${w.word}';document.getElementById('vMeaning').value='${w.meaning}';showToast('Palavra: ${w.word}','success');"><div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1.1rem;color:var(--gold);">${w.word}</div><div style="font-size:.8rem;color:var(--muted);">${w.meaning}</div></div>`).join('');}
+
+// ── HELPERS ──
+function setBtnLoading(id,on){const b=document.getElementById(id);if(!b)return;if(on){b._orig=b.innerHTML;b.innerHTML='<span class="spinner"></span>A processar...';b.disabled=true;}else{b.innerHTML=b._orig;b.disabled=false;}}
+function showToast(msg,type='success'){const t=document.getElementById('toast');t.className='show '+type;document.getElementById('toastIcon').textContent=type==='success'?'✓':'✕';document.getElementById('toastMsg').textContent=msg;clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),3500);}
+</script>
+</body>
+</html>
