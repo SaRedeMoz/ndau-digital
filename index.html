@@ -778,7 +778,7 @@ select option{background:#fff;}
         <div class="dash-cap cap-diamond"></div>
         <div class="qtbl">
           <div class="qh"><span class="qt">Fila de Validação</span><span class="chip" id="qCnt">A carregar...</span></div>
-          <table><thead><tr><th>Original</th><th>Tradução Ndau</th><th>Tipo</th><th>Tradutor</th><th>Acção</th></tr></thead>
+          <table><thead><tr><th>Conteúdo</th><th>Tipo</th><th>Tradutor</th><th>Acção</th></tr></thead>
           <tbody id="vQueue"></tbody></table>
         </div>
       </div>
@@ -878,7 +878,7 @@ const COLS=['var(--red)','var(--gold)','var(--green)','var(--purple)','var(--tea
 let profile=null,rInt=null,isRec=false,aChunks=[],mRec=null,aBlob=null;
 
 function showView(n){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById('view-'+n).classList.add('active');}
-function swT(n,b){document.querySelectorAll('.dash-tab').forEach(t=>t.classList.remove('active'));document.getElementById('tab-'+n).classList.add('active');if(b){document.querySelectorAll('.sb-item').forEach(x=>x.classList.remove('on'));b.classList.add('on');}showView('dashboard');}
+function swT(n,b){document.querySelectorAll('.dash-tab').forEach(t=>t.classList.remove('active'));document.getElementById('tab-'+n).classList.add('active');if(b){document.querySelectorAll('.sb-item').forEach(x=>x.classList.remove('on'));b.classList.add('on');}showView('dashboard');if(n==='voice')lMyRecordings();}
 function openModal(t){document.getElementById('authMov').classList.add('open');togA(t==='login'?'login':'reg');}
 function closeMov(){document.getElementById('authMov').classList.remove('open');}
 function togA(t){const l=t==='login';document.getElementById('loginF').style.display=l?'block':'none';document.getElementById('regF').style.display=l?'none':'block';document.getElementById('mTtl').textContent=l?'Entrar':'Criar Conta';document.getElementById('mSub').textContent=l?'Bem-vindo de volta':'Junte-se à comunidade Ndau';}
@@ -942,7 +942,7 @@ window.onUserReady=function(p){
   document.getElementById('sbNm').textContent=n;
   document.getElementById('dashNm').textContent=n.split(' ')[0];
   updM(p);showView('dashboard');
-  lPhrases();lVWords();lVQueue();lHist();wProf();
+  lPhrases();lVWords();lVQueue();lHist();wProf();lMyRecordings();
   toast('Bem-vindo(a), '+n.split(' ')[0]+'!','success');
   document.getElementById('navLinks').innerHTML=`<span style="font-size:.8rem;color:var(--muted)">${n}</span><button class="nav-btn prim" onclick="swT('earnings',null)" style="margin-left:.5rem">Ganhos</button><button class="nav-btn" onclick="doOut()" style="margin-left:.25rem">Sair</button>`;
 };
@@ -1148,13 +1148,27 @@ function aWave(on){
 function lVQueue(){
   if(!profile)return;
   const{query,collection,where,limit,onSnapshot,db}=gFB();
+  // Carregar tanto traduções como gravações pendentes
   const q=query(collection(db,'translations'),where('status','==','pending'),limit(20));
   onSnapshot(q,snap=>{
     const rows=snap.docs.filter(d=>d.data().userId!==profile.uid);
     document.getElementById('qCnt').textContent=rows.length+' pendentes';
     document.getElementById('vQueue').innerHTML=rows.length===0
       ?'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2.5rem;">Nenhuma contribuição pendente</td></tr>'
-      :rows.map(d=>{const t=d.data();return`<tr><td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(t.sourceText||'').substring(0,28)}</td><td style="color:var(--red);font-weight:600;">${(t.ndauText||'').substring(0,28)}</td><td><span class="badge b-p">${t.type==='voice'?'Voz':'Texto'}</span></td><td style="color:var(--muted);font-size:.8rem;">${t.userName||'—'}</td><td><div class="abts"><button class="abt a-ok" onclick="valI('${d.id}','approve',this)">Validar</button><button class="abt a-no" onclick="valI('${d.id}','reject',this)">Rejeitar</button></div></td></tr>`;}).join('');
+      :rows.map(d=>{const t=d.data();
+        const isVoice=t.type==='voice';
+        const content=isVoice
+          ?`<span style="font-family:'Syne',sans-serif;font-weight:700">${t.word||'—'}</span> <span style="color:var(--muted);font-size:.78rem">${t.meaning||''}</span>`
+          :`${(t.sourceText||'').substring(0,22)}... → <span style="color:var(--red);font-weight:600">${(t.ndauText||'').substring(0,22)}</span>`;
+        const audioBtn=isVoice&&t.audioBase64
+          ?`<button onclick="playRec('${d.id}')" style="padding:.2rem .5rem;border-radius:99px;border:1.5px solid var(--red);background:rgba(192,57,43,.06);color:var(--red);font-size:.72rem;font-weight:600;cursor:pointer;margin-left:.5rem;">▶</button><audio id="audio_${d.id}" style="display:none;width:140px;height:28px;" controls></audio>`
+          :'';
+        return`<tr>
+          <td style="max-width:200px">${content}${audioBtn}</td>
+          <td><span class="badge b-p">${isVoice?'Voz':'Texto'}</span></td>
+          <td style="color:var(--muted);font-size:.8rem;">${t.userName||'—'}</td>
+          <td><div class="abts"><button class="abt a-ok" onclick="valI('${d.id}','approve',this)">Validar</button><button class="abt a-no" onclick="valI('${d.id}','reject',this)">Rejeitar</button></div></td>
+        </tr>`;}).join('');
   });
 }
 async function valI(id,action,btn){
@@ -1175,6 +1189,75 @@ async function doW(m){
     toast('Levantamento via '+m+' solicitado!','success');
   }catch(e){toast('Erro: '+e.message,'error');}
 }
+async function lMyRecordings(){
+  if(!profile)return;
+  const{query,collection,where,orderBy,limit,getDocs,db}=gFB();
+  const container=document.getElementById('myRecordings');
+  if(!container)return;
+  container.innerHTML='<div style="color:var(--muted);font-size:.82rem;">A carregar...</div>';
+  try{
+    const q=query(collection(db,'recordings'),where('userId','==',profile.uid),orderBy('createdAt','desc'),limit(20));
+    const snap=await getDocs(q);
+    if(snap.empty){
+      container.innerHTML='<div style="color:var(--muted);font-size:.82rem;padding:1rem;background:var(--card);border-radius:var(--rs);border:1px solid var(--border);">Ainda sem gravações. Grava a tua primeira palavra!</div>';
+      return;
+    }
+    container.innerHTML=snap.docs.map(d=>{
+      const r=d.data();
+      const dt=r.createdAt?.toDate?.()?.toLocaleDateString('pt-MZ')||'—';
+      const statusCls=r.status==='validated'?'b-ok':r.status==='rejected'?'b-no':'b-p';
+      const statusTxt=r.status==='validated'?'Validado':r.status==='rejected'?'Rejeitado':'Pendente';
+      const hasAudio=r.audioBase64?true:false;
+      return `<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:1rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <div style="flex:1;min-width:150px;">
+          <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1rem;color:var(--text);">${r.word||'—'}</div>
+          <div style="font-size:.78rem;color:var(--muted);">${r.meaning||''} · ${dt}</div>
+        </div>
+        <span class="badge ${statusCls}">${statusTxt}</span>
+        ${hasAudio?`<button onclick="playRec('${d.id}')" style="padding:.3rem .8rem;border-radius:99px;border:1.5px solid var(--red);background:rgba(192,57,43,.06);color:var(--red);font-size:.78rem;font-weight:600;cursor:pointer;">▶ Ouvir</button>
+        <audio id="audio_${d.id}" style="display:none;max-width:200px;height:32px;" controls></audio>`
+        :'<span style="font-size:.75rem;color:var(--muted);">Sem áudio</span>'}
+      </div>`;
+    }).join('');
+  }catch(e){
+    container.innerHTML='<div style="color:var(--red);font-size:.82rem;">Erro ao carregar: '+e.message+'</div>';
+  }
+}
+
+// Armazena dados de gravações em cache para o player
+const recCache={};
+
+async function playRec(id){
+  const audio=document.getElementById('audio_'+id);
+  if(!audio)return;
+
+  // Se já tem src, só tocar/parar
+  if(audio.src&&audio.src!==window.location.href){
+    audio.style.display='block';
+    audio.paused?audio.play():audio.pause();
+    return;
+  }
+
+  // Carregar do Firestore
+  const btn=audio.previousElementSibling;
+  if(btn)btn.textContent='A carregar...';
+
+  try{
+    const{getDoc,doc,db}=gFB();
+    const snap=await getDoc(doc(db,'recordings',id));
+    if(!snap.exists()){toast('Gravação não encontrada','error');return;}
+    const data=snap.data();
+    if(!data.audioBase64){toast('Sem áudio nesta gravação','error');return;}
+    audio.src=data.audioBase64;
+    audio.style.display='block';
+    audio.play();
+    if(btn)btn.textContent='▶ Ouvir';
+  }catch(e){
+    toast('Erro ao carregar áudio: '+e.message,'error');
+    if(btn)btn.textContent='▶ Ouvir';
+  }
+}
+
 async function lHist(){
   if(!profile)return;
   const{query,collection,where,orderBy,limit,getDocs,db}=gFB();
