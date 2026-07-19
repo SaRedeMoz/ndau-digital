@@ -871,11 +871,27 @@ function togA(t){const l=t==='login';document.getElementById('loginF').style.dis
 function gFB(){return{auth:window.FB.auth,db:window.FB.db,storage:window.FB.storage,...window.FBFNS};}
 
 async function doLogin(){
-  const em=document.getElementById('lEm').value.trim();const pw=document.getElementById('lPw').value;
+  const em=document.getElementById('lEm').value.trim();
+  const pw=document.getElementById('lPw').value;
   if(!em||!pw){toast('Preencha todos os campos','error');return;}
   sLoad('lBtn',true);
-  try{const{signInWithEmailAndPassword,auth}=gFB();await signInWithEmailAndPassword(auth,em,pw);}
-  catch(e){toast('Erro: '+e.message,'error');}sLoad('lBtn',false);
+  try{
+    const{signInWithEmailAndPassword,auth}=gFB();
+    await signInWithEmailAndPassword(auth,em,pw);
+    // sucesso — onAuthStateChanged trata do resto
+  }catch(e){
+    console.error('Login erro:',e.code, e.message);
+    if(e.code==='auth/user-not-found'||e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'){
+      toast('Email ou senha incorrectos','error');
+    }else if(e.code==='auth/too-many-requests'){
+      toast('Muitas tentativas. Aguarda uns minutos.','error');
+    }else if(e.code==='auth/network-request-failed'){
+      toast('Sem ligacao a internet','error');
+    }else{
+      toast('Erro: '+e.message,'error');
+    }
+    sLoad('lBtn',false);
+  }
 }
 async function doReg(){
   const nm=document.getElementById('rNm').value.trim();const sn=document.getElementById('rSn').value.trim();
@@ -890,7 +906,17 @@ async function doReg(){
     await setDoc(doc(db,'users',cr.user.uid),{name:nm+' '+sn,email:em,phone:ph,ndauLevel:lv,totalWords:0,totalVoice:0,pendingMT:0,earnedMT:0,withdrawnMT:0,createdAt:serverTimestamp(),lastActive:serverTimestamp()});
     try{await updateDoc(doc(db,'platform_stats','global'),{totalUsers:increment(1)});}catch(e){}
     toast('Conta criada! Bem-vindo(a) '+nm,'success');
-  }catch(e){toast('Erro: '+e.message,'error');}sLoad('rBtn',false);
+  }catch(e){
+    console.error('Registo erro:',e.code,e.message);
+    if(e.code==='auth/email-already-in-use'){
+      toast('Este email ja tem conta. Faz login.','error');
+    }else if(e.code==='auth/weak-password'){
+      toast('Senha fraca — usa pelo menos 6 caracteres','error');
+    }else{
+      toast('Erro: '+e.message,'error');
+    }
+    sLoad('rBtn',false);
+  }
 }
 async function doOut(){const{signOut,auth}=gFB();await signOut(auth);profile=null;showView('home');document.getElementById('navLinks').innerHTML=`<button class="nav-btn" onclick="showView('home')">Início</button><button class="nav-btn" onclick="openModal('login')">Entrar</button><button class="nav-btn prim" onclick="openModal('reg')">Criar Conta</button>`;toast('Sessão terminada','success');}
 
@@ -1040,34 +1066,56 @@ async function sVoice(){
   const m=document.getElementById('vMeaning').value.trim();
   if(!w){toast('Escreve a palavra Ndau','error');return;}
   sLoad('sendVBtn',true);
-  document.getElementById('recSt').textContent='A enviar...';
+  document.getElementById('recSt').textContent='A converter audio...';
   try{
-    const{sRef,uploadBytes,getDownloadURL,storage,addDoc,collection,db,serverTimestamp,updateDoc,doc,increment}=gFB();
-    const ext=aBlob.type.includes('ogg')?'ogg':'webm';
-    const storageRef=sRef(storage,'recordings/'+profile.uid+'/'+Date.now()+'_'+w+'.'+ext);
-    document.getElementById('recSt').textContent='A carregar audio...';
-    const snapshot=await uploadBytes(storageRef,aBlob);
-    const url=await getDownloadURL(snapshot.ref);
-    document.getElementById('recSt').textContent='A guardar dados...';
-    await addDoc(collection(db,'recordings'),{userId:profile.uid,userName:profile.name,word:w,meaning:m,audioUrl:url,status:'pending',earnedMT:0,validatedBy:[],type:'voice',createdAt:serverTimestamp()});
-    await updateDoc(doc(db,'users',profile.uid),{totalVoice:increment(1),pendingMT:increment(1)});
-    document.getElementById('vWord').value='';
-    document.getElementById('vMeaning').value='';
-    document.getElementById('sendVBtn').style.display='none';
-    document.getElementById('recSt').textContent='Pronto para gravar';
-    aBlob=null;aChunks=[];
-    toast('✅ "'+w+'" enviado com sucesso!','success');
+    // Converter blob para base64 e guardar directamente no Firestore
+    const reader=new FileReader();
+    reader.readAsDataURL(aBlob);
+    reader.onloadend=async function(){
+      try{
+        const base64Audio=reader.result; // data:audio/webm;base64,....
+        const{addDoc,collection,db,serverTimestamp,updateDoc,doc,increment}=gFB();
+        document.getElementById('recSt').textContent='A guardar no Firestore...';
+        await addDoc(collection(db,'recordings'),{
+          userId:    profile.uid,
+          userName:  profile.name,
+          word:      w,
+          meaning:   m,
+          audioBase64: base64Audio,
+          status:    'pending',
+          earnedMT:  0,
+          validatedBy: [],
+          type:      'voice',
+          createdAt: serverTimestamp()
+        });
+        await updateDoc(doc(db,'users',profile.uid),{
+          totalVoice: increment(1),
+          pendingMT:  increment(1)
+        });
+        document.getElementById('vWord').value='';
+        document.getElementById('vMeaning').value='';
+        document.getElementById('sendVBtn').style.display='none';
+        document.getElementById('recSt').textContent='Pronto para gravar';
+        aBlob=null; aChunks=[];
+        toast('✅ "'+w+'" guardado no Firestore!','success');
+        sLoad('sendVBtn',false);
+      }catch(e){
+        console.error('Erro Firestore:',e);
+        toast('Erro ao guardar: '+e.message,'error');
+        document.getElementById('recSt').textContent='Erro — tenta de novo';
+        sLoad('sendVBtn',false);
+      }
+    };
+    reader.onerror=function(){
+      toast('Erro ao ler o audio','error');
+      sLoad('sendVBtn',false);
+    };
   }catch(e){
     console.error('Erro:',e);
-    if(e.code==='storage/unauthorized'){
-      toast('Erro de permissao no Storage — actualiza as regras no Firebase','error');
-      document.getElementById('recSt').textContent='Erro de permissao';
-    }else{
-      toast('Erro: '+e.message,'error');
-      document.getElementById('recSt').textContent='Erro — tenta de novo';
-    }
+    toast('Erro: '+e.message,'error');
+    document.getElementById('recSt').textContent='Erro — tenta de novo';
+    sLoad('sendVBtn',false);
   }
-  sLoad('sendVBtn',false);
 }
 function aWave(on){
   const bs=document.querySelectorAll('.wb');
