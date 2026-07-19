@@ -9,12 +9,12 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc, addDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot, serverTimestamp, increment, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, addDoc, updateDoc, collection, query, where, orderBy, limit, onSnapshot, serverTimestamp, increment, getDocs, arrayUnion } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 const firebaseConfig={apiKey:"AIzaSyCfkR35XtAy9lcTdlNBXdTFFBYxOmZ3tvc",authDomain:"ndau-digital.firebaseapp.com",projectId:"ndau-digital",storageBucket:"ndau-digital.firebasestorage.app",messagingSenderId:"27422833165",appId:"1:27422833165:web:78b0e9e007492933f0f344"};
 const app=initializeApp(firebaseConfig);const auth=getAuth(app);const db=getFirestore(app);const storage=getStorage(app);
 window.FB={auth,db,storage};
-window.FBFNS={doc,setDoc,getDoc,addDoc,updateDoc,collection,query,where,orderBy,limit,onSnapshot,serverTimestamp,increment,getDocs,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,onAuthStateChanged,updateProfile,sRef,uploadBytes,getDownloadURL};
+window.FBFNS={doc,setDoc,getDoc,addDoc,updateDoc,collection,query,where,orderBy,limit,onSnapshot,serverTimestamp,increment,getDocs,arrayUnion,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,onAuthStateChanged,updateProfile,sRef,uploadBytes,getDownloadURL};
 onAuthStateChanged(auth,async(user)=>{
   if(user){
     // Entrar imediatamente com dados básicos do auth
@@ -1145,38 +1145,117 @@ function aWave(on){
   else{clearInterval(rInt);const h=[5,16,9,26,13,20,7,24,11,17,5,13];bs.forEach((b,i)=>{b.style.height=(h[i]||9)+'px';b.style.opacity='.22';});}
 }
 
-function lVQueue(){
+async function lVQueue(){
   if(!profile)return;
-  const{query,collection,where,limit,onSnapshot,db}=gFB();
-  const q=query(collection(db,'translations'),where('status','==','pending'),limit(20));
-  onSnapshot(q,snap=>{
-    const rows=snap.docs.filter(d=>d.data().userId!==profile.uid);
-    document.getElementById('qCnt').textContent=rows.length+' pendentes';
-    document.getElementById('vQueue').innerHTML=rows.length===0
-      ?'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2.5rem;">Nenhuma contribuição pendente</td></tr>'
-      :rows.map(d=>{const t=d.data();
-        const isVoice=t.type==='voice';
-        const content=isVoice
-          ?`<span style="font-family:'Syne',sans-serif;font-weight:700">${t.word||'—'}</span> <span style="color:var(--muted);font-size:.78rem">${t.meaning||''}</span>`
-          :`${(t.sourceText||'').substring(0,22)}... → <span style="color:var(--red);font-weight:600">${(t.ndauText||'').substring(0,22)}</span>`;
-        const audioBtn=isVoice&&t.audioBase64
-          ?`<button onclick="playRec('${d.id}')" style="padding:.2rem .5rem;border-radius:99px;border:1.5px solid var(--red);background:rgba(192,57,43,.06);color:var(--red);font-size:.72rem;font-weight:600;cursor:pointer;margin-left:.5rem;">▶</button><audio id="audio_${d.id}" style="display:none;width:140px;height:28px;" controls></audio>`
-          :'';
-        return`<tr>
-          <td style="max-width:200px">${content}${audioBtn}</td>
-          <td><span class="badge b-p">${isVoice?'Voz':'Texto'}</span></td>
-          <td style="color:var(--muted);font-size:.8rem;">${t.userName||'—'}</td>
-          <td><div class="abts"><button class="abt a-ok" onclick="valI('${d.id}','approve',this)">Validar</button><button class="abt a-no" onclick="valI('${d.id}','reject',this)">Rejeitar</button></div></td>
-        </tr>`;}).join('');
-  });
-}
-async function valI(id,action,btn){
-  const{updateDoc,doc,db,arrayUnion}=gFB();const f=action==='approve'?'validatedBy':'rejectedBy';
+  const{query,collection,where,limit,getDocs,db}=gFB();
+  const tbody=document.getElementById('vQueue');
+  tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:1rem;">A carregar...</td></tr>';
   try{
-    await updateDoc(doc(db,'translations',id),{[f]:arrayUnion(profile.uid)});
-    btn.closest('tr').cells[4].innerHTML=action==='approve'?'<span class="badge b-ok">Validado</span>':'<span class="badge b-no">Rejeitado</span>';
-    toast(action==='approve'?'Validado!':'Rejeitado.',action==='approve'?'success':'error');
-  }catch(e){toast('Erro: '+e.message,'error');}
+    // Carregar traduções pendentes
+    const q1=query(collection(db,'translations'),where('status','==','pending'),limit(20));
+    // Carregar gravações pendentes
+    const q2=query(collection(db,'recordings'),where('status','==','pending'),limit(20));
+    const[snap1,snap2]=await Promise.all([getDocs(q1),getDocs(q2)]);
+
+    // Juntar tudo
+    const allDocs=[
+      ...snap1.docs.map(d=>({id:d.id,data:d.data(),col:'translations'})),
+      ...snap2.docs.map(d=>({id:d.id,data:d.data(),col:'recordings'})),
+    ];
+
+    document.getElementById('qCnt').textContent=allDocs.length+' pendentes';
+
+    if(allDocs.length===0){
+      tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2.5rem;">Nenhuma contribuição pendente para validar</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML=allDocs.map(({id,data:t,col})=>{
+      const isVoice=col==='recordings'||t.type==='voice';
+
+      // Conteúdo da linha
+      const content=isVoice
+        ?`<strong style="font-size:.95rem">${t.word||'—'}</strong> <span style="color:var(--muted);font-size:.78rem">${t.meaning||''}</span>`
+        :`<span style="font-size:.82rem">${(t.sourceText||'').substring(0,25)}</span><br><span style="color:var(--red);font-weight:600;font-size:.82rem">${(t.ndauText||'').substring(0,25)}</span>`;
+
+      // Botão de áudio — só para gravações de voz
+      const audioSection=isVoice
+        ?`<div style="margin-top:.4rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
+            <button onclick="playValRec('${id}','${col}')" id="playbtn_${id}"
+              style="padding:.25rem .7rem;border-radius:99px;border:1.5px solid var(--red);
+              background:rgba(192,57,43,.08);color:var(--red);font-size:.75rem;
+              font-weight:600;cursor:pointer;">▶ Ouvir</button>
+            <audio id="vaudio_${id}" style="display:none;height:30px;max-width:180px;" controls></audio>
+          </div>`
+        :'';
+
+      return`<tr>
+        <td style="max-width:220px;padding:.9rem 1.1rem">${content}${audioSection}</td>
+        <td><span class="badge ${isVoice?'b-p':'b-p'}">${isVoice?'🎙 Voz':'📝 Texto'}</span></td>
+        <td style="color:var(--muted);font-size:.8rem;">${t.userName||'—'}</td>
+        <td><div class="abts">
+          <button class="abt a-ok" onclick="valI('${id}','approve','${col}',this)">✓ Validar</button>
+          <button class="abt a-no" onclick="valI('${id}','reject','${col}',this)">✕ Rejeitar</button>
+        </div></td>
+      </tr>`;
+    }).join('');
+  }catch(e){
+    console.error('lVQueue erro:',e);
+    tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--red);padding:1rem;">Erro: '+e.message+'</td></tr>';
+  }
+}
+
+// Tocar áudio na fila de validação
+async function playValRec(id,col){
+  const audio=document.getElementById('vaudio_'+id);
+  const btn=document.getElementById('playbtn_'+id);
+  if(!audio)return;
+
+  // Se já tem src, tocar/pausar
+  if(audio.getAttribute('data-loaded')){
+    audio.style.display='block';
+    audio.paused?audio.play():audio.pause();
+    return;
+  }
+
+  btn.textContent='A carregar...';
+  btn.disabled=true;
+  try{
+    const{getDoc,doc,db}=gFB();
+    const snap=await getDoc(doc(db,col,id));
+    if(!snap.exists()){toast('Gravação não encontrada','error');return;}
+    const data=snap.data();
+    if(!data.audioBase64){toast('Sem áudio nesta gravação','error');return;}
+    audio.src=data.audioBase64;
+    audio.setAttribute('data-loaded','1');
+    audio.style.display='block';
+    audio.play();
+    btn.textContent='▶ Ouvir';
+    btn.disabled=false;
+  }catch(e){
+    toast('Erro ao carregar: '+e.message,'error');
+    btn.textContent='▶ Ouvir';
+    btn.disabled=false;
+  }
+}
+async function valI(id,action,col,btn){
+  const{updateDoc,doc,db,arrayUnion}=gFB();
+  const f=action==='approve'?'validatedBy':'rejectedBy';
+  const colName=col||'translations';
+  try{
+    await updateDoc(doc(db,colName,id),{
+      [f]: arrayUnion(profile.uid),
+      status: action==='approve'?'validated':'rejected'
+    });
+    const row=btn.closest('tr');
+    row.cells[3].innerHTML=action==='approve'
+      ?'<span class="badge b-ok">✓ Validado</span>'
+      :'<span class="badge b-no">✕ Rejeitado</span>';
+    toast(action==='approve'?'✓ Validado!':'Rejeitado.',action==='approve'?'success':'error');
+  }catch(e){
+    console.error('valI erro:',e);
+    toast('Erro: '+e.message,'error');
+  }
 }
 async function doW(m){
   if(!profile||!(profile.earnedMT>0)){toast('Saldo insuficiente','error');return;}
