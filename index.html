@@ -944,37 +944,130 @@ async function subT(){
 
 async function tRec(){
   const w=document.getElementById('vWord').value.trim();
-  if(!w){toast('Escreva a palavra Ndau','error');return;}
-  isRec=!isRec;const btn=document.getElementById('recBtn');
+  if(!w){toast('Escreva a palavra Ndau antes de gravar','error');return;}
+
+  // Se já está a gravar — parar
   if(isRec){
+    isRec=false;
+    const btn=document.getElementById('recBtn');
     try{
-      const s=await navigator.mediaDevices.getUserMedia({audio:true});
-      mRec=new MediaRecorder(s);aChunks=[];
-      mRec.ondataavailable=e=>aChunks.push(e.data);
-      mRec.onstop=()=>{aBlob=new Blob(aChunks,{type:'audio/webm'});document.getElementById('sendVBtn').style.display='inline-flex';};
-      mRec.start();btn.classList.add('rec');btn.innerHTML='&#9646;&#9646;';
-      document.getElementById('recSt').textContent='A gravar...';aWave(true);
-    }catch(e){toast('Microfone não disponível','error');isRec=false;}
-  }else{
-    if(mRec&&mRec.state!=='inactive'){mRec.stop();mRec.stream.getTracks().forEach(t=>t.stop());}
-    btn.classList.remove('rec');btn.innerHTML='&#9679;';
-    document.getElementById('recSt').textContent='Pronto para enviar';aWave(false);
+      if(mRec&&mRec.state==='recording'){
+        mRec.stop();
+        mRec.stream.getTracks().forEach(t=>t.stop());
+      }
+    }catch(e){}
+    btn.classList.remove('rec');
+    btn.innerHTML='&#9679;';
+    document.getElementById('recSt').textContent='✅ Gravação pronta — clica Enviar';
+    aWave(false);
+    return;
+  }
+
+  // Iniciar gravação
+  isRec=true;
+  const btn=document.getElementById('recBtn');
+  document.getElementById('recSt').textContent='A pedir microfone...';
+
+  try{
+    // Verificar se browser suporta
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      toast('O teu browser não suporta gravação. Usa o Chrome.','error');
+      isRec=false; return;
+    }
+
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+
+    // Escolher formato compatível
+    const mimeType=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ?'audio/webm;codecs=opus'
+      :MediaRecorder.isTypeSupported('audio/webm')
+      ?'audio/webm'
+      :'audio/ogg';
+
+    mRec=new MediaRecorder(stream,{mimeType});
+    aChunks=[];
+
+    mRec.ondataavailable=e=>{
+      if(e.data&&e.data.size>0) aChunks.push(e.data);
+    };
+
+    mRec.onstop=()=>{
+      if(aChunks.length===0){
+        toast('Gravação vazia — tenta de novo','error');
+        isRec=false; return;
+      }
+      aBlob=new Blob(aChunks,{type:mimeType});
+      document.getElementById('sendVBtn').style.display='inline-flex';
+      document.getElementById('recSt').textContent='✅ Gravação pronta — clica Enviar';
+      toast('Gravação concluída! Clica Enviar.','success');
+    };
+
+    mRec.onerror=e=>{
+      toast('Erro na gravação: '+e.error,'error');
+      isRec=false;
+      btn.classList.remove('rec');
+      btn.innerHTML='&#9679;';
+    };
+
+    mRec.start(100); // recolhe dados a cada 100ms
+    btn.classList.add('rec');
+    btn.innerHTML='&#9646;&#9646;';
+    document.getElementById('recSt').textContent='🔴 A gravar... (clica para parar)';
+    aWave(true);
+    toast('A gravar! Clica novamente para parar.','success');
+
+  }catch(e){
+    isRec=false;
+    btn.classList.remove('rec');
+    btn.innerHTML='&#9679;';
+    if(e.name==='NotAllowedError'){
+      document.getElementById('recSt').textContent='Permissão negada';
+      toast('Permissão de microfone negada. Clica no cadeado 🔒 no browser e permite o microfone.','error');
+    } else if(e.name==='NotFoundError'){
+      document.getElementById('recSt').textContent='Microfone não encontrado';
+      toast('Nenhum microfone encontrado no dispositivo.','error');
+    } else {
+      document.getElementById('recSt').textContent='Erro: '+e.message;
+      toast('Erro: '+e.message,'error');
+    }
+    aWave(false);
   }
 }
 async function sVoice(){
-  if(!aBlob||!profile)return;
-  const w=document.getElementById('vWord').value.trim();const m=document.getElementById('vMeaning').value.trim();
+  if(!aBlob){toast('Grava primeiro antes de enviar','error');return;}
+  if(!profile){toast('Sessao expirada','error');return;}
+  const w=document.getElementById('vWord').value.trim();
+  const m=document.getElementById('vMeaning').value.trim();
+  if(!w){toast('Escreve a palavra Ndau','error');return;}
   sLoad('sendVBtn',true);
+  document.getElementById('recSt').textContent='A enviar...';
   try{
     const{sRef,uploadBytes,getDownloadURL,storage,addDoc,collection,db,serverTimestamp,updateDoc,doc,increment}=gFB();
-    const r=sRef(storage,`recordings/${profile.uid}/${Date.now()}_${w}.webm`);
-    const sn=await uploadBytes(r,aBlob);const url=await getDownloadURL(sn.ref);
+    const ext=aBlob.type.includes('ogg')?'ogg':'webm';
+    const storageRef=sRef(storage,'recordings/'+profile.uid+'/'+Date.now()+'_'+w+'.'+ext);
+    document.getElementById('recSt').textContent='A carregar audio...';
+    const snapshot=await uploadBytes(storageRef,aBlob);
+    const url=await getDownloadURL(snapshot.ref);
+    document.getElementById('recSt').textContent='A guardar dados...';
     await addDoc(collection(db,'recordings'),{userId:profile.uid,userName:profile.name,word:w,meaning:m,audioUrl:url,status:'pending',earnedMT:0,validatedBy:[],type:'voice',createdAt:serverTimestamp()});
     await updateDoc(doc(db,'users',profile.uid),{totalVoice:increment(1),pendingMT:increment(1)});
-    document.getElementById('vWord').value='';document.getElementById('vMeaning').value='';
-    document.getElementById('sendVBtn').style.display='none';document.getElementById('recSt').textContent='Pronto para gravar';aBlob=null;
-    toast('"'+w+'" enviado!','success');
-  }catch(e){toast('Erro: '+e.message,'error');}sLoad('sendVBtn',false);
+    document.getElementById('vWord').value='';
+    document.getElementById('vMeaning').value='';
+    document.getElementById('sendVBtn').style.display='none';
+    document.getElementById('recSt').textContent='Pronto para gravar';
+    aBlob=null;aChunks=[];
+    toast('✅ "'+w+'" enviado com sucesso!','success');
+  }catch(e){
+    console.error('Erro:',e);
+    if(e.code==='storage/unauthorized'){
+      toast('Erro de permissao no Storage — actualiza as regras no Firebase','error');
+      document.getElementById('recSt').textContent='Erro de permissao';
+    }else{
+      toast('Erro: '+e.message,'error');
+      document.getElementById('recSt').textContent='Erro — tenta de novo';
+    }
+  }
+  sLoad('sendVBtn',false);
 }
 function aWave(on){
   const bs=document.querySelectorAll('.wb');
