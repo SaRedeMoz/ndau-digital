@@ -1148,7 +1148,6 @@ function aWave(on){
 function lVQueue(){
   if(!profile)return;
   const{query,collection,where,limit,onSnapshot,db}=gFB();
-  // Carregar tanto traduções como gravações pendentes
   const q=query(collection(db,'translations'),where('status','==','pending'),limit(20));
   onSnapshot(q,snap=>{
     const rows=snap.docs.filter(d=>d.data().userId!==profile.uid);
@@ -1196,13 +1195,16 @@ async function lMyRecordings(){
   if(!container)return;
   container.innerHTML='<div style="color:var(--muted);font-size:.82rem;">A carregar...</div>';
   try{
-    const q=query(collection(db,'recordings'),where('userId','==',profile.uid),orderBy('createdAt','desc'),limit(20));
+    // Sem orderBy para evitar índice composto
+    const q=query(collection(db,'recordings'),where('userId','==',profile.uid),limit(20));
     const snap=await getDocs(q);
     if(snap.empty){
       container.innerHTML='<div style="color:var(--muted);font-size:.82rem;padding:1rem;background:var(--card);border-radius:var(--rs);border:1px solid var(--border);">Ainda sem gravações. Grava a tua primeira palavra!</div>';
       return;
     }
-    container.innerHTML=snap.docs.map(d=>{
+    // Ordenar por data no cliente
+    const sortedDocs=snap.docs.sort((a,b)=>(b.data().createdAt?.seconds||0)-(a.data().createdAt?.seconds||0));
+    container.innerHTML=sortedDocs.map(d=>{
       const r=d.data();
       const dt=r.createdAt?.toDate?.()?.toLocaleDateString('pt-MZ')||'—';
       const statusCls=r.status==='validated'?'b-ok':r.status==='rejected'?'b-no':'b-p';
@@ -1260,14 +1262,43 @@ async function playRec(id){
 
 async function lHist(){
   if(!profile)return;
-  const{query,collection,where,orderBy,limit,getDocs,db}=gFB();
+  const{query,collection,where,limit,getDocs,db}=gFB();
+  const tb=document.getElementById('histTbl');
+  tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem;">A carregar...</td></tr>';
   try{
-    const q=query(collection(db,'translations'),where('userId','==',profile.uid),orderBy('createdAt','desc'),limit(30));
-    const snap=await getDocs(q);const tb=document.getElementById('histTbl');
-    if(snap.empty){tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">Sem contribuições ainda.</td></tr>';return;}
-    tb.innerHTML=snap.docs.map(d=>{const t=d.data();const dt=t.createdAt?.toDate?.()?.toLocaleDateString('pt-MZ')||'—';
-    return`<tr><td style="color:var(--muted);font-size:.76rem">${dt}</td><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(t.sourceText||'').substring(0,30)}</td><td><span class="badge b-p">${t.type==='voice'?'Voz':'Texto'}</span></td><td><span class="badge ${t.status==='validated'?'b-ok':t.status==='rejected'?'b-no':'b-p'}">${t.status==='validated'?'Validado':t.status==='rejected'?'Rejeitado':'Pendente'}</span></td><td style="color:var(--green);font-weight:600">${t.earnedMT>0?t.earnedMT+' MT':'—'}</td></tr>`;}).join('');
-  }catch(e){console.error(e);}
+    // Sem orderBy para evitar índice — ordenar no cliente
+    const q=query(collection(db,'translations'),where('userId','==',profile.uid),limit(30));
+    const snap=await getDocs(q);
+    if(snap.empty){
+      tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">Sem contribuições ainda. Começa a traduzir!</td></tr>';
+      return;
+    }
+    // Ordenar por data no cliente
+    const docs=snap.docs.sort((a,b)=>{
+      const ta=a.data().createdAt?.seconds||0;
+      const tb2=b.data().createdAt?.seconds||0;
+      return tb2-ta;
+    });
+    tb.innerHTML=docs.map(d=>{
+      const t=d.data();
+      const dt=t.createdAt?.toDate?.()?.toLocaleDateString('pt-MZ')||'—';
+      const statusCls=t.status==='validated'?'b-ok':t.status==='rejected'?'b-no':'b-p';
+      const statusTxt=t.status==='validated'?'Validado':t.status==='rejected'?'Rejeitado':'Pendente';
+      const content=t.type==='voice'
+        ?`<strong>${t.word||'—'}</strong> (${t.meaning||'voz'})`
+        :`${(t.sourceText||'').substring(0,30)}`;
+      return`<tr>
+        <td style="color:var(--muted);font-size:.76rem">${dt}</td>
+        <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${content}</td>
+        <td><span class="badge b-p">${t.type==='voice'?'Voz':'Texto'}</span></td>
+        <td><span class="badge ${statusCls}">${statusTxt}</span></td>
+        <td style="color:var(--green);font-weight:600">${t.earnedMT>0?t.earnedMT+' MT':'—'}</td>
+      </tr>`;
+    }).join('');
+  }catch(e){
+    console.error('lHist erro:',e);
+    tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--red);padding:1rem;">Erro: '+e.message+'</td></tr>';
+  }
 }
 function lPhrases(){
   document.getElementById('phraseList').innerHTML=PH.map((p,i)=>`<div class="phi" style="border-left:4px solid ${COLS[i]}"><div style="flex:1"><div class="phl">Português</div><div class="pht">${p.pt}</div></div><button class="btn btn-out" style="font-size:.76rem;padding:.32rem .8rem" onclick="uP(${i})">Usar</button></div>`).join('');
