@@ -16,8 +16,22 @@ const app=initializeApp(firebaseConfig);const auth=getAuth(app);const db=getFire
 window.FB={auth,db,storage};
 window.FBFNS={doc,setDoc,getDoc,addDoc,updateDoc,collection,query,where,orderBy,limit,onSnapshot,serverTimestamp,increment,getDocs,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,onAuthStateChanged,updateProfile,sRef,uploadBytes,getDownloadURL};
 onAuthStateChanged(auth,async(user)=>{
-  if(user){const snap=await getDoc(doc(db,"users",user.uid));if(snap.exists()){window._profile={uid:user.uid,...snap.data()};window.onUserReady&&window.onUserReady(window._profile);}}
-  else{window._profile=null;window.onUserSignedOut&&window.onUserSignedOut();}
+  if(user){
+    // Entrar imediatamente com dados básicos do auth
+    window._profile={uid:user.uid,name:user.displayName||user.email.split('@')[0],email:user.email,phone:'',totalWords:0,totalVoice:0,pendingMT:0,earnedMT:0};
+    window.onUserReady&&window.onUserReady(window._profile);
+    // Depois actualizar com dados do Firestore em background
+    try{
+      const snap=await getDoc(doc(db,'users',user.uid));
+      if(snap.exists()){
+        window._profile={uid:user.uid,...snap.data()};
+        window.onProfileUpdate&&window.onProfileUpdate(window._profile);
+      }
+    }catch(e){console.warn('Firestore perfil:',e);}
+  }else{
+    window._profile=null;
+    window.onUserSignedOut&&window.onUserSignedOut();
+  }
 });
 onSnapshot(doc(db,"platform_stats","global"),snap=>{
   if(snap.exists()){const d=snap.data();
@@ -874,13 +888,14 @@ async function doLogin(){
   const em=document.getElementById('lEm').value.trim();
   const pw=document.getElementById('lPw').value;
   if(!em||!pw){toast('Preencha todos os campos','error');return;}
-  sLoad('lBtn',true);
+  const btn=document.getElementById('lBtn');
+  btn.disabled=true;btn.textContent='A entrar...';
   try{
     const{signInWithEmailAndPassword,auth}=gFB();
     await signInWithEmailAndPassword(auth,em,pw);
-    // sucesso — onAuthStateChanged trata do resto
+    // sucesso — onAuthStateChanged entra imediatamente
   }catch(e){
-    console.error('Login erro:',e.code, e.message);
+    console.error('Login erro:',e.code,e.message);
     if(e.code==='auth/user-not-found'||e.code==='auth/wrong-password'||e.code==='auth/invalid-credential'){
       toast('Email ou senha incorrectos','error');
     }else if(e.code==='auth/too-many-requests'){
@@ -890,7 +905,7 @@ async function doLogin(){
     }else{
       toast('Erro: '+e.message,'error');
     }
-    sLoad('lBtn',false);
+    btn.disabled=false;btn.textContent='Entrar';
   }
 }
 async function doReg(){
@@ -930,6 +945,13 @@ window.onUserReady=function(p){
   lPhrases();lVWords();lVQueue();lHist();wProf();
   toast('Bem-vindo(a), '+n.split(' ')[0]+'!','success');
   document.getElementById('navLinks').innerHTML=`<span style="font-size:.8rem;color:var(--muted)">${n}</span><button class="nav-btn prim" onclick="swT('earnings',null)" style="margin-left:.5rem">Ganhos</button><button class="nav-btn" onclick="doOut()" style="margin-left:.25rem">Sair</button>`;
+};
+// Actualiza métricas quando Firestore carrega em background
+window.onProfileUpdate=function(p){
+  profile=p;updM(p);
+  const n=p.name||'Tradutor';
+  document.getElementById('sbNm').textContent=n;
+  document.getElementById('dashNm').textContent=n.split(' ')[0];
 };
 window.onUserSignedOut=function(){showView('home');};
 
