@@ -262,7 +262,10 @@ nav{position:sticky;top:0;z-index:100;
 <!-- Bottom nav -->
 <div class="bottom-nav">
   <button class="bn-item on" onclick="goPage('home')" id="bn-home">
-    <span class="bn-icon">🏠</span><span>Início</span>
+    <span class="bn-icon">🏠</span><span>Praticar</span>
+  </button>
+  <button class="bn-item" onclick="goPage('learn-home')" id="bn-learn-home">
+    <span class="bn-icon">📚</span><span>Aprender</span>
   </button>
   <button class="bn-item" onclick="goPage('dict')" id="bn-dict">
     <span class="bn-icon">📖</span><span>Dicionário</span>
@@ -279,6 +282,28 @@ nav{position:sticky;top:0;z-index:100;
     <div class="fb-txt" id="fbTxt"></div>
   </div>
   <button class="fb-btn" onclick="advanceLesson()">Continuar</button>
+</div>
+
+<!-- LEARN HOME -->
+<div class="page" id="pg-learn-home">
+  <div style="margin-bottom:1.25rem;">
+    <h2 style="font-family:'Outfit',sans-serif;font-size:1.4rem;font-weight:800;">Aprende Ndau</h2>
+    <p style="color:var(--muted);font-size:.82rem;margin-top:.2rem;">Gramática, pronúncia, escrita e mais</p>
+  </div>
+  <div class="topics-grid" id="learnGrid"></div>
+</div>
+
+<!-- LEARN LESSON -->
+<div class="page" id="pg-learn-lesson">
+  <div class="lesson-wrap">
+    <div class="lesson-header">
+      <button class="lesson-back" onclick="exitLearnLesson()">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><polyline points="14,5 8,11 14,17" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="lesson-prog"><div class="lesson-bar" id="learnBar" style="width:0%"></div></div>
+    </div>
+    <div id="learnLessonArea"></div>
+  </div>
 </div>
 
 <!-- Word modal -->
@@ -310,7 +335,9 @@ function goPage(p){
   document.querySelectorAll('.bn-item').forEach(x=>x.classList.remove('on'));
   document.getElementById('pg-'+p).classList.add('on');
   document.getElementById('bn-'+p)?.classList.add('on');
+  document.getElementById('fbBar').classList.remove('show');
   if(p==='home') renderHome();
+  if(p==='learn-home') renderLearnHome();
   if(p==='dict') renderDict();
   if(p==='prog') renderProg();
 }
@@ -421,7 +448,7 @@ function startTopic(key){
   const queue = buildQueue(topic);
   if(!queue.length){ alert('Sem palavras suficientes neste tópico ainda.'); return; }
 
-  LS = { topicKey:key, topic, queue, idx:0, lives:3, score:0, correct:0, total:queue.length };
+  LS = { topicKey:key, topic, queue, idx:0, lives:3, score:0, correct:0, total:queue.length, _learnIdx:0, _learnFlipped:false };
   
   goToLesson();
   showAct();
@@ -455,21 +482,59 @@ function showAct(){
   const color = LS.topic.color;
 
   if(q.type==='learn'){
+    // Show one word at a time with flip card
+    LS._learnIdx = LS._learnIdx||0;
+    const lIdx = LS._learnIdx;
+    const w = q.words[lIdx];
+    const isLast = lIdx >= q.words.length-1;
+    const total = q.words.length;
+    const isFlipped = LS._learnFlipped||false;
+
     area.innerHTML = `
-      <div class="act-card">
-        <div class="act-tag" style="background:${color};">${q.actLabel}</div>
-        <div style="display:grid;gap:.7rem;">
-          ${q.words.map(w=>`
-            <div style="background:var(--linen);border-radius:var(--rs);padding:.85rem 1rem;text-align:left;">
-              <div style="font-family:'Outfit',sans-serif;font-size:1.5rem;font-weight:900;color:${color};">${w.ndau}</div>
-              <div style="font-size:.95rem;font-weight:600;margin-top:.2rem;">${w.pt}</div>
-              ${w.en?`<div style="font-size:.75rem;color:var(--muted);">🇬🇧 ${w.en}</div>`:''}
-            </div>`).join('')}
+      <div style="text-align:center;margin-bottom:.75rem;">
+        <span style="font-size:.78rem;color:var(--muted);">${lIdx+1} / ${total}</span>
+      </div>
+      <div class="act-tag" style="background:${color};display:block;text-align:center;margin-bottom:1rem;">${q.actLabel}</div>
+
+      <!-- FLIP CARD -->
+      <div id="flipCard" onclick="flipLearnCard()" style="
+        perspective:1000px;height:220px;cursor:pointer;max-width:480px;margin:0 auto 1.25rem;">
+        <div id="flipInner" style="
+          position:relative;width:100%;height:100%;
+          transform-style:preserve-3d;transition:transform .5s;
+          ${isFlipped?'transform:rotateY(180deg)':''}">
+          <!-- FRONT: Ndau word -->
+          <div style="position:absolute;inset:0;backface-visibility:hidden;
+            background:${color};border-radius:var(--r);
+            display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;">
+            <div style="font-size:.75rem;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.75rem;">Ndau</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:2.5rem;font-weight:900;color:#fff;">${w.ndau}</div>
+            ${w.cat?`<div style="font-size:.72rem;color:rgba(255,255,255,.65);margin-top:.5rem;background:rgba(0,0,0,.15);padding:.15rem .6rem;border-radius:99px;">${w.cat}</div>`:''}
+            <div style="font-size:.78rem;color:rgba(255,255,255,.7);margin-top:1.25rem;">Toca para ver tradução</div>
+          </div>
+          <!-- BACK: PT + EN -->
+          <div style="position:absolute;inset:0;backface-visibility:hidden;transform:rotateY(180deg);
+            background:var(--card);border:3px solid ${color};border-radius:var(--r);
+            display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;">
+            <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem;">Português</div>
+            <div style="font-family:'Outfit',sans-serif;font-size:1.8rem;font-weight:800;color:var(--text);margin-bottom:.5rem;">${w.pt}</div>
+            ${w.en?`<div style="font-size:.88rem;color:var(--muted);">🇬🇧 ${w.en}</div>`:''}
+            ${w.plural?`<div style="font-size:.78rem;color:var(--teal);margin-top:.4rem;">Plural: ${w.plural}</div>`:''}
+          </div>
         </div>
       </div>
-      <div class="act-footer">
-        <button class="cont-btn" onclick="advanceLesson()">Continuar →</button>
+
+      <div style="display:flex;gap:.6rem;justify-content:center;">
+        ${lIdx>0?`<button onclick="prevLearnWord()" style="padding:.5rem 1.2rem;border-radius:99px;border:1.5px solid var(--border);background:transparent;font-family:'Nunito',sans-serif;font-weight:600;font-size:.88rem;cursor:pointer;color:var(--muted);">← Anterior</button>`:''}
+        <button onclick="nextLearnWord(${isLast?'true':'false'})" style="padding:.5rem 1.5rem;border-radius:99px;border:none;background:${color};color:#fff;font-family:'Nunito',sans-serif;font-weight:700;font-size:.92rem;cursor:pointer;">
+          ${isFlipped? (isLast?'Começar exercícios →':'Próxima →') : 'Ver tradução'}
+        </button>
       </div>`;
+
+    // Auto-flip after 2s if not already flipped
+    if(!isFlipped){
+      LS._flipTimer = setTimeout(()=>{ if(!LS._learnFlipped) flipLearnCard(); }, 2000);
+    }
     return;
   }
 
@@ -614,6 +679,45 @@ function doFeedback(isOk, correct){
 }
 
 // ── ADVANCE ──
+function flipLearnCard(){
+  clearTimeout(LS._flipTimer);
+  LS._learnFlipped = true;
+  const inner = document.getElementById('flipInner');
+  if(inner) inner.style.transform='rotateY(180deg)';
+  // Change button text
+  const q = LS.queue[LS.idx];
+  const isLast = (LS._learnIdx||0) >= q.words.length-1;
+  const btns = document.querySelectorAll('[onclick*="nextLearnWord"]');
+  btns.forEach(b=>b.textContent=isLast?'Começar exercícios →':'Próxima →');
+}
+
+function nextLearnWord(isLast){
+  clearTimeout(LS._flipTimer);
+  const q = LS.queue[LS.idx];
+  if(!LS._learnFlipped){
+    // First tap = flip
+    flipLearnCard();
+    return;
+  }
+  if(isLast){
+    // Done learning — advance to next activity
+    LS._learnIdx=0;
+    LS._learnFlipped=false;
+    advanceLesson();
+  } else {
+    LS._learnIdx=(LS._learnIdx||0)+1;
+    LS._learnFlipped=false;
+    showAct();
+  }
+}
+
+function prevLearnWord(){
+  clearTimeout(LS._flipTimer);
+  LS._learnIdx=Math.max(0,(LS._learnIdx||0)-1);
+  LS._learnFlipped=false;
+  showAct();
+}
+
 function advanceLesson(){
   document.getElementById('fbBar').classList.remove('show');
   if(!LS) return;
@@ -747,9 +851,692 @@ function renderProg(){
   }).join('');
 }
 
+
+const LESSONS = [
+  {
+    id:'abc', title:'Abecedário Ndau', icon:'◈', color:'#0E7A6A',
+    sections:[
+      {
+        type:'intro',
+        title:'O abecedário do Ndau',
+        text:'O Ndau usa o alfabeto latino com algumas letras e combinações especiais. Ao contrário do Português, o Ndau tem sons que precisam de duas ou três letras juntas para serem escritos correctamente.',
+      },
+      {
+        type:'alphabet',
+        title:'Letras e sons',
+        items:[
+          {letter:'A a', sound:'a', example:'aba (lado)', note:'Como em "casa"'},
+          {letter:'B b', sound:'b', example:'baba (pai)', note:'Como em "bola"'},
+          {letter:'BH bh', sound:'bh', example:'mbhaka (gato)', note:'B aspirado — som mais forte'},
+          {letter:'BV bv', sound:'bv', example:'bvudzi (cabelo)', note:'B + V juntos'},
+          {letter:'C c', sound:'tch', example:'citi (cadeira)', note:'Como "tch" em "tchau"'},
+          {letter:'CH ch', sound:'ch', example:'chando (frio)', note:'Como "ch" em "chave"'},
+          {letter:'D d', sound:'d', example:'divi (lado)', note:'Como em "dado"'},
+          {letter:'DH dh', sound:'dh', example:'dhodha (velho)', note:'D aspirado'},
+          {letter:'DZ dz', sound:'dz', example:'dziso (olho)', note:'D + Z juntos'},
+          {letter:'E e', sound:'e', example:'ena (ele)', note:'Como em "mesa"'},
+          {letter:'F f', sound:'f', example:'fogo (lareira)', note:'Como em "faca"'},
+          {letter:'G g', sound:'g', example:'gore (ano)', note:'Como em "gato"'},
+          {letter:'H h', sound:'h', example:'huku (galinha)', note:'H aspirado suave'},
+          {letter:'HW hw', sound:'hw', example:'hwendo (viagem)', note:'H + W'},
+          {letter:'I i', sound:'i', example:'inini (eu)', note:'Como em "ilha"'},
+          {letter:'J j', sound:'j', example:'jira (capulana)', note:'Como em "janela"'},
+          {letter:'K k', sound:'k', example:'kura (crescer)', note:'Como em "casa"'},
+          {letter:'KH kh', sound:'kh', example:'khamba (leopardo)', note:'K aspirado'},
+          {letter:'KU- ku-', sound:'ku', example:'ku-rga (comer)', note:'Prefixo de todos os verbos'},
+          {letter:'M m', sound:'m', example:'mai (mãe)', note:'Como em "mãe"'},
+          {letter:'MB mb', sound:'mb', example:'mbeu (semente)', note:'M + B pré-nasalizado'},
+          {letter:'N n', sound:'n', example:'ndau (pessoa)', note:'Como em "nada"'},
+          {letter:'ND nd', sound:'nd', example:'ndau', note:'N + D pré-nasalizado'},
+          {letter:'NG ng', sound:'ng', example:'ngoma (tambor)', note:'Como em "Angola"'},
+          {letter:'NH nh', sound:'nh', example:'nhoka (cobra)', note:'Como "nh" em "ninho"'},
+          {letter:'NJ nj', sound:'nj', example:'njiva (pombo)', note:'N + J'},
+          {letter:'NY ny', sound:'ny', example:'nyama (carne)', note:'Como "nh" suave'},
+          {letter:'O o', sound:'o', example:'oro (ouro)', note:'Como em "ovo"'},
+          {letter:'P p', sound:'p', example:'pano (aqui)', note:'Como em "pato"'},
+          {letter:'PH ph', sound:'ph', example:'phondo (osso)', note:'P aspirado'},
+          {letter:'R r', sound:'r', example:'ruwa (flor)', note:'R suave'},
+          {letter:'S s', sound:'s', example:'soka (pé)', note:'Como em "sol"'},
+          {letter:'SH sh', sound:'sh', example:'shiri (pássaro)', note:'Como "ch" em inglês'},
+          {letter:'T t', sound:'t', example:'tamba (dançar)', note:'Como em "taco"'},
+          {letter:'TH th', sound:'th', example:'thamu (bossa)', note:'T aspirado'},
+          {letter:'TS ts', sound:'ts', example:'tsoka (pé)', note:'T + S'},
+          {letter:'U u', sound:'u', example:'uchi (mel)', note:'Como em "uva"'},
+          {letter:'V v', sound:'v', example:'vana (crianças)', note:'Como em "vaca"'},
+          {letter:'VH vh', sound:'vh', example:'vhiri (pêlo)', note:'V aspirado'},
+          {letter:'W w', sound:'w', example:'wana (encontrar)', note:'Como em "water"'},
+          {letter:'Y y', sound:'y', example:'yaya (irmã)', note:'Como em "iogurte"'},
+          {letter:'Z z', sound:'z', example:'zina (nome)', note:'Como em "zebra"'},
+          {letter:'ZV zv', sound:'zv', example:'zvituru (cadeiras)', note:'Z + V — único do Ndau'},
+          {letter:'ZVH zvh', sound:'zvh', example:'zvhina (pouco)', note:'Combinação especial'},
+        ]
+      },
+      {
+        type:'highlight',
+        title:'Regra de ouro: o prefixo KU-',
+        text:'Todos os verbos em Ndau no infinitivo começam com <strong>KU-</strong>. É como o "ar/er/ir" em Português.',
+        examples:['Ku-rga = Comer','Ku-mwa = Beber','Ku-enda = Ir','Ku-uya = Vir','Ku-wona = Ver','Ku-reketa = Falar']
+      }
+    ],
+    words:['Mhoro','Mangwanani','Kwahle','Ndiripo'],
+    quiz:[
+      {q:'Como se escreve o prefixo dos verbos no infinitivo?',correct:'KU-',opts:['MU-','KU-','CHI-','VA-']},
+      {q:'"NY" em Ndau soa como qual combinação em Português?',correct:'NH',opts:['N','NY','NH','GN']},
+      {q:'Qual combinação é ÚNICA do idioma Ndau?',correct:'ZV',opts:['CH','ZV','NY','BH']},
+      {q:'Como se pronuncia "CH" em Ndau?',correct:'Como "tch" em tchau',opts:['Como "k"','Como "s"','Como "tch" em tchau','Como "sh"']},
+      {q:'O que é "BH" em Ndau?',correct:'B aspirado — som mais forte',opts:['Igual ao B','B aspirado — som mais forte','Combinação B+H','Não existe']},
+    ]
+  },
+  {
+    id:'greet', title:'Saudações', icon:'👋', color:'#27AE60',
+    sections:[
+      {
+        type:'intro',
+        title:'Como cumprimentar em Ndau',
+        text:'As saudações são muito importantes na cultura Ndau. Cumprimentar correctamente mostra respeito e é a base de qualquer conversa.',
+      },
+      {
+        type:'table',
+        title:'Saudações básicas',
+        headers:['Ndau','Português','Quando usar'],
+        rows:[
+          ['Mhoro','Olá','A qualquer hora'],
+          ['Mangwanani','Bom dia / De manhã','Das 6h às 12h'],
+          ['Masikati','Boa tarde','Das 12h às 18h'],
+          ['Manheru','Boa noite','Após as 18h'],
+          ['Kwahle','Adeus','Ao despedir'],
+          ['Ndiripo','Estou bem','Resposta a "como estás?"'],
+          ['Zvirinani','Está tudo bem','Resposta positiva'],
+          ['Ndinokutendai','Obrigado/a','Agradecimento'],
+          ['Hae / Gogoi','Com licença','Antes de falar'],
+        ]
+      },
+      {
+        type:'dialogue',
+        title:'Diálogo típico',
+        lines:[
+          {speaker:'A', line:'Mhoro!', pt:'Olá!'},
+          {speaker:'B', line:'Mhoro! Mangwanani!', pt:'Olá! Bom dia!'},
+          {speaker:'A', line:'Waswera sei?', pt:'Como estás?'},
+          {speaker:'B', line:'Ndiripo. Ndinokutendai. Iwewe uri sei?', pt:'Estou bem. Obrigado. E tu?'},
+          {speaker:'A', line:'Ndiripo zvakare.', pt:'Também estou bem.'},
+          {speaker:'B', line:'Kwahle!', pt:'Adeus!'},
+          {speaker:'A', line:'Kwahle! Fara!', pt:'Adeus! Fica bem!'},
+        ]
+      },
+      {
+        type:'highlight',
+        title:'Expressões úteis',
+        text:'Aprende estas expressões para te apresentares:',
+        examples:[
+          'Zita rangu ndi... = O meu nome é...',
+          'Ndinobva ku... = Sou de...',
+          'Ndinofara kukuona = Fico feliz em te ver',
+          'Tinoona = Até logo',
+        ]
+      }
+    ],
+    words:['Mhoro','Mangwanani','Masikati','Manheru','Kwahle','Ndiripo','Ndinokutendai','Zvirinani'],
+    quiz:[
+      {q:'Como se diz "Boa tarde" em Ndau?',correct:'Masikati',opts:['Mangwanani','Masikati','Manheru','Mhoro']},
+      {q:'"Ndinokutendai" significa:',correct:'Obrigado/a',opts:['Adeus','Olá','Obrigado/a','Boa noite']},
+      {q:'Que saudação se usa de manhã?',correct:'Mangwanani',opts:['Masikati','Manheru','Mangwanani','Kwahle']},
+      {q:'"Ndiripo" significa:',correct:'Estou bem',opts:['Estou bem','Adeus','Bom dia','Obrigado']},
+      {q:'"Hae" ou "Gogoi" usa-se:',correct:'Para pedir licença antes de falar',opts:['Para dizer adeus','Para agradecer','Para pedir licença antes de falar','Para saudar de manhã']},
+    ]
+  },
+  {
+    id:'nums', title:'Números e Contagem', icon:'🔢', color:'#D4900A',
+    sections:[
+      {
+        type:'intro',
+        title:'Os números em Ndau',
+        text:'O Ndau tem um sistema de números próprio. Os números de 1 a 10 são a base — a partir daí combinam-se para formar números maiores.',
+      },
+      {
+        type:'numbers_grid',
+        title:'Números 1 a 20',
+        items:[
+          {num:1,ndau:'Umwe'},{num:2,ndau:'Vaviri'},{num:3,ndau:'Vatatu'},
+          {num:4,ndau:'China'},{num:5,ndau:'Vashanu'},{num:6,ndau:'Nhanhatu'},
+          {num:7,ndau:'Nomwe'},{num:8,ndau:'Sere'},{num:9,ndau:'Pfumbamwe'},
+          {num:10,ndau:'Gumi'},{num:11,ndau:'Gumi neUmwe'},{num:12,ndau:'Gumi neVaviri'},
+          {num:13,ndau:'Gumi neVatatu'},{num:14,ndau:'Gumi neChina'},{num:15,ndau:'Gumi neVashanu'},
+          {num:20,ndau:'Makumi maviri'},{num:30,ndau:'Makumi matatu'},{num:40,ndau:'Makumi mana'},
+          {num:100,ndau:'Zana'},{num:1000,ndau:'Chiuru'},
+        ]
+      },
+      {
+        type:'highlight',
+        title:'Como formar números compostos',
+        text:'A partir do 11, usa-se <strong>Gumi ne...</strong> (dez e...):',
+        examples:[
+          'Gumi neUmwe = 11 (dez e um)',
+          'Gumi neVaviri = 12 (dez e dois)',
+          'Makumi maviri = 20 (dezenas duas)',
+          'Makumi maviri neUmwe = 21',
+          'Zana = 100 | Chiuru = 1000',
+        ]
+      },
+      {
+        type:'table',
+        title:'Números ordinais',
+        headers:['Ordem','Ndau','Português'],
+        rows:[
+          ['1º','Wekutanga','Primeiro'],
+          ['2º','Wechipiri','Segundo'],
+          ['3º','Wechitatu','Terceiro'],
+          ['Último','Wekupedzisira','Último'],
+        ]
+      }
+    ],
+    words:['Umwe','Vaviri','Vatatu','China','Vashanu','Nhanhatu','Nomwe','Sere','Pfumbamwe','Gumi'],
+    quiz:[
+      {q:'Como se diz "três" em Ndau?',correct:'Vatatu',opts:['Vaviri','Vatatu','China','Vashanu']},
+      {q:'"Gumi" significa:',correct:'10',opts:['5','8','10','6']},
+      {q:'Como se forma o número 11?',correct:'Gumi neUmwe',opts:['Gumi Umwe','GuminaUmwe','Gumi neUmwe','Umwe Gumi']},
+      {q:'Como se diz "cem" em Ndau?',correct:'Zana',opts:['Chiuru','Zana','Gumi gumi','Makumi']},
+      {q:'"Makumi maviri" significa:',correct:'20',opts:['12','20','30','200']},
+    ]
+  },
+  {
+    id:'pron', title:'Pronomes e Conjugação', icon:'👤', color:'#8E44AD',
+    sections:[
+      {
+        type:'intro',
+        title:'Pronomes pessoais em Ndau',
+        text:'Os pronomes em Ndau são diferentes do Português. Cada pronome tem um <strong>prefixo verbal</strong> que muda quando conjugamos os verbos.',
+      },
+      {
+        type:'table',
+        title:'Pronomes pessoais',
+        headers:['Pronome','Ndau','Prefixo verbal','Exemplo'],
+        rows:[
+          ['Eu','Inini','Ndi-','Ndi-no-rga (Eu como)'],
+          ['Tu','Iwewe','U-','U-no-rga (Tu comes)'],
+          ['Ele/Ela','Ena','A-','A-no-rga (Ele/Ela come)'],
+          ['Nós','Isusu','Ti-','Ti-no-rga (Nós comemos)'],
+          ['Vós','Imwimwi','Mu-','Mu-no-rga (Vós comeis)'],
+          ['Eles/Elas','Vona','Va-','Va-no-rga (Eles comem)'],
+        ]
+      },
+      {
+        type:'highlight',
+        title:'A fórmula mágica do verbo Ndau',
+        text:'Para conjugar qualquer verbo no presente: <strong>Prefixo + NO + Raiz</strong>',
+        examples:[
+          'Ndi + no + rga = Ndi-no-rga (Eu como)',
+          'U + no + mwa = U-no-mwa (Tu bebes)',
+          'A + no + enda = A-no-enda (Ele vai)',
+          'Ti + no + wona = Ti-no-wona (Nós vemos)',
+          'Va + no + reketa = Va-no-reketa (Eles falam)',
+        ]
+      },
+      {
+        type:'table',
+        title:'Tempos verbais',
+        headers:['Tempo','Fórmula','Exemplo'],
+        rows:[
+          ['Presente','Pref + NO + raiz','Ndi-no-rga (Eu como)'],
+          ['Passado','Pref + KA + raiz','Ndi-ka-rga (Eu comi)'],
+          ['Futuro','Pref + CHA + raiz','Ndi-cha-rga (Eu comerei)'],
+          ['Negação','Pref + SA + raiz','Ndi-sa-rga (Eu não como)'],
+        ]
+      }
+    ],
+    words:['Inini','Iwewe','Ena','Isusu','Imwimwi','Vona'],
+    quiz:[
+      {q:'Como se diz "Eu" em Ndau?',correct:'Inini',opts:['Vona','Inini','Iwewe','Ena']},
+      {q:'Qual é o prefixo de "Eles/Elas"?',correct:'Va-',opts:['Ndi-','Ti-','Va-','Mu-']},
+      {q:'"Isusu" significa:',correct:'Nós',opts:['Eu','Tu','Eles','Nós']},
+      {q:'Como se diz "Tu comes" em Ndau?',correct:'U-no-rga',opts:['A-no-rga','Ndi-no-rga','U-no-rga','Ti-no-rga']},
+      {q:'Para formar o passado usa-se:',correct:'Prefixo + KA + raiz',opts:['Prefixo + NO + raiz','Prefixo + KA + raiz','Prefixo + CHA + raiz','KU + raiz']},
+    ]
+  },
+  {
+    id:'nouns', title:'Substantivos e Classes', icon:'📝', color:'#E67E22',
+    sections:[
+      {
+        type:'intro',
+        title:'As classes nominais do Ndau',
+        text:'O Ndau tem um sistema de <strong>classes nominais</strong> — grupos de substantivos que partilham os mesmos prefixos no singular e plural. É diferente do género masculino/feminino do Português.',
+      },
+      {
+        type:'table',
+        title:'As 6 classes principais',
+        headers:['Classe','Singular','Plural','O que inclui','Exemplos'],
+        rows:[
+          ['1ª Classe','Mu-','Va-','Pessoas','Musikana/Vasikana, Murimi/Varimi'],
+          ['2ª Classe','Mu-','Mi-','Árvores e plantas','Mumbuti/Mimbuti, Munda/Minda'],
+          ['3ª Classe','Chi-','Zvi-','Objectos','Chituru/Zvituru, Chido/Zvido'],
+          ['4ª Classe','(i)-','(dzi)-','Animais','Ngombe, Imbwa, Nhoka'],
+          ['5ª Classe','(ri)-','Ma-','Geral','Banga/Mapanga, Gore/Makore'],
+          ['6ª Classe','Ru-','Dzi-','Abstrato','Rurimi/Marirumi, Ruwa/Maruwa'],
+        ]
+      },
+      {
+        type:'highlight',
+        title:'Como pluralizar',
+        text:'Muda o prefixo — o resto da palavra fica igual:',
+        examples:[
+          'Mu-sik-ana → Va-sik-ana (rapariga → raparigas)',
+          'Mu-fana → Va-fana (rapaz → rapazes)',
+          'Chi-turu → Zvi-turu (cadeira → cadeiras)',
+          'Ba-nga → Ma-panga (catana → catanas)',
+        ]
+      },
+      {
+        type:'table',
+        title:'Exemplos de plurais',
+        headers:['Singular','Plural','Português'],
+        rows:[
+          ['Musikana','Vasikana','Rapariga/s'],
+          ['Mufana','Vafana','Rapaz/es'],
+          ['Mundhu','Vandhu','Pessoa/s'],
+          ['Chituru','Zvituru','Cadeira/s'],
+          ['Banga','Mapanga','Catana/s'],
+          ['Gore','Makore','Ano/s'],
+          ['Ruwa','Maruwa','Flor/es'],
+        ]
+      }
+    ],
+    words:['Musikana','Mufana','Mundhu','Mwana','Murimi','Mukadzi'],
+    quiz:[
+      {q:'O plural de "Musikana" é:',correct:'Vasikana',opts:['Misikana','Vasikana','Chisikana','Masikana']},
+      {q:'A 1ª Classe inclui principalmente:',correct:'Pessoas',opts:['Animais','Pessoas','Objectos','Plantas']},
+      {q:'O prefixo "Chi-" forma:',correct:'3ª Classe (objectos)',opts:['1ª Classe','2ª Classe','3ª Classe (objectos)','5ª Classe']},
+      {q:'O plural de "Banga" (catana) é:',correct:'Mapanga',opts:['Mabanga','Mapanga','Vibanga','Mibanga']},
+      {q:'"Vandhu" é o plural de:',correct:'Mundhu (pessoa)',opts:['Mwana','Mundhu (pessoa)','Murimi','Musikana']},
+    ]
+  },
+  {
+    id:'write', title:'Escrita em Ndau', icon:'✍️', color:'#C0392B',
+    sections:[
+      {
+        type:'intro',
+        title:'Aprender a escrever em Ndau',
+        text:'O Ndau é uma língua oral — durante séculos foi transmitida oralmente. Hoje tem uma ortografia oficial baseada no alfabeto latino. Aprender a escrever correctamente é essencial para preservar a língua.',
+      },
+      {
+        type:'highlight',
+        title:'Regras de escrita',
+        text:'',
+        examples:[
+          '1. Os verbos no infinitivo escrevem-se sempre com KU- antes da raiz: Ku-rga, Ku-mwa',
+          '2. Os prefixos de conjugação ligam-se com hífen: Ndi-no-rga, A-ka-enda',
+          '3. As combinações especiais (BH, ZV, NH) sempre em conjunto',
+          '4. As vogais são sempre pronunciadas: A, E, I, O, U',
+          '5. O acento tónico cai geralmente na penúltima sílaba',
+        ]
+      },
+      {
+        type:'table',
+        title:'Exemplos de frases escritas',
+        headers:['Ndau','Português'],
+        rows:[
+          ['Mwana a-no-rga sadza.','A criança come massa.'],
+          ['Inini ndi-no-da ku-u-wona.','Eu quero vê-lo.'],
+          ['Isusu ti-no-reketa Chindau.','Nós falamos Ndau.'],
+          ['Murimi a-ka-rima munda.','O agricultor lavrou o campo.'],
+          ['Vona va-no-wona ngombe.','Eles vêem os bois.'],
+          ['Munozwi anani?','Como te chamas?'],
+          ['Ndinozwi... / Zita rangu ndi...','Chamo-me...'],
+        ]
+      },
+      {
+        type:'highlight',
+        title:'Provérbios Ndau',
+        text:'Os provérbios (Mazwi) são a sabedoria oral do povo Ndau:',
+        examples:[
+          '"Murimi a-no-kura na munda wake." — O agricultor cresce com o seu campo. (Quem trabalha, prospera.)',
+          '"Ruoko rumwe harugezі muпуа." — Uma mão só não lava o rosto. (Precisamos uns dos outros.)',
+          '"Wakura musina kuziva kuziva." — Crescer sem aprender é crescer em vão.',
+        ]
+      }
+    ],
+    words:['Ku-rga','Ku-mwa','Ku-enda','Ku-reketa','Ku-bika','Ku-tamba'],
+    quiz:[
+      {q:'Como se escreve "comer" no infinitivo em Ndau?',correct:'Ku-rga',opts:['rga','Kurga','Ku-rga','KU.rga']},
+      {q:'"Ndi-ka-rga" significa:',correct:'Eu comi (passado)',opts:['Eu como','Eu comi (passado)','Eu comerei','Tu comeste']},
+      {q:'Na frase "Mwana a-no-rga sadza", quem come?',correct:'A criança (Mwana)',opts:['O agricultor','A criança (Mwana)','Nós','Eles']},
+      {q:'O acento tónico em Ndau cai normalmente:',correct:'Na penúltima sílaba',opts:['Na primeira sílaba','Na última sílaba','Na penúltima sílaba','Varia sempre']},
+      {q:'Como se diz "Como te chamas?" em Ndau?',correct:'Munozwi anani?',opts:['Unobva kupi?','Munozwi anani?','Waswera sei?','Zita rangu ndi?']},
+    ]
+  },
+  {
+    id:'grammar', title:'Gramática Essencial', icon:'📚', color:'#2C3E50',
+    sections:[
+      {
+        type:'intro',
+        title:'Gramática básica do Ndau',
+        text:'O Ndau tem uma estrutura gramatical própria, diferente do Português. A ordem das palavras, os prefixos e os sufixos são a chave para falar correctamente.',
+      },
+      {
+        type:'highlight',
+        title:'Ordem das palavras',
+        text:'A estrutura básica da frase em Ndau é:',
+        examples:[
+          'SUJEITO + VERBO CONJUGADO + OBJECTO',
+          'Mwana a-no-rga sadza. (A criança come massa.)',
+          'Não existe artigo definido/indefinido (o/a/um/uma)',
+          'Os adjectivos vêm DEPOIS do substantivo',
+        ]
+      },
+      {
+        type:'table',
+        title:'Palavras interrogativas',
+        headers:['Ndau','Português'],
+        rows:[
+          ['Ani? / Ndiani?','Quem?'],
+          ['Chii? / Nyi?','O quê?'],
+          ['Kupi? / Kwapi?','Onde?'],
+          ['Rini?','Quando?'],
+          ['Kudini?','Como?'],
+          ['Ngani? / Manganai?','Quantos/as?'],
+          ['Nei? / Ngekuti?','Porquê?'],
+        ]
+      },
+      {
+        type:'table',
+        title:'Negação',
+        headers:['Forma','Exemplo','Português'],
+        rows:[
+          ['Pref + SA + raiz','Ndi-sa-rga','Eu não como'],
+          ['Haisi...','Haisi Musikana','Não é uma rapariga'],
+          ['Haiwa','Haiwa!','Não!'],
+        ]
+      },
+      {
+        type:'table',
+        title:'Conjunções úteis',
+        headers:['Ndau','Português'],
+        rows:[
+          ['Na / Zve','E (e também)'],
+          ['Asi / Asi asi','Mas'],
+          ['Kana','Ou'],
+          ['Nokuti','Porque'],
+          ['Zvino','Então / Portanto'],
+          ['Kuti','Que (conjunção)'],
+        ]
+      }
+    ],
+    words:['Inini','Iwewe','Ena','Isusu','Ku-rga','Ku-reketa'],
+    quiz:[
+      {q:'A ordem correcta da frase em Ndau é:',correct:'Sujeito + Verbo + Objecto',opts:['Verbo + Sujeito + Objecto','Sujeito + Verbo + Objecto','Objecto + Sujeito + Verbo','Livre']},
+      {q:'Como se diz "Onde?" em Ndau?',correct:'Kupi? / Kwapi?',opts:['Rini?','Kudini?','Kupi? / Kwapi?','Ndiani?']},
+      {q:'Como se forma a negação no presente?',correct:'Prefixo + SA + raiz',opts:['Haiwa + verbo','Prefixo + NO + raiz','Prefixo + SA + raiz','Não + verbo']},
+      {q:'"Haiwa" significa:',correct:'Não!',opts:['Sim!','Não!','Talvez','Porque?']},
+      {q:'Como se diz "e/também" em Ndau?',correct:'Na / Zve',opts:['Asi','Na / Zve','Kana','Nokuti']},
+    ]
+  },
+];
+
+
+// ─── LEARN SECTION ───
+function renderLearnHome(){
+  const done = LESSONS.filter(l=>S.done_learn&&S.done_learn[l.id]).length;
+  document.getElementById('learnGrid').innerHTML = LESSONS.map(l=>{
+    const isDone = S.done_learn&&S.done_learn[l.id];
+    const score = isDone?S.done_learn[l.id].score:0;
+    return `<div class="topic-card${isDone?' done':''}" onclick="openLesson('${l.id}')"
+      style="border-color:${isDone?'var(--green)':'transparent'}">
+      ${isDone?'<div class="topic-done-badge">✓</div>':''}
+      <div class="topic-top" style="background:${l.color}20;">
+        <span style="font-size:2.5rem;">${l.icon}</span>
+      </div>
+      <div class="topic-bottom">
+        <div class="topic-name">${l.title}</div>
+        <div class="topic-count">${l.sections.length} secções · Quiz final</div>
+        <div class="topic-prog">
+          <div class="topic-bar" style="width:${score}%;background:${l.color};"></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let CL = null; // current lesson {lesson, sectionIdx, phase:'read'|'quiz', quizIdx, score}
+
+function openLesson(id){
+  const lesson = LESSONS.find(l=>l.id===id);
+  if(!lesson) return;
+  CL = {lesson, sectionIdx:0, phase:'read', quizIdx:0, score:0};
+  showLearnPage();
+  showSection();
+}
+
+function showLearnPage(){
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.bn-item').forEach(x=>x.classList.remove('on'));
+  document.getElementById('pg-learn-lesson').classList.add('on');
+  document.getElementById('fbBar').classList.remove('show');
+}
+
+function exitLearnLesson(){
+  document.getElementById('fbBar').classList.remove('show');
+  CL=null;
+  goPage('learn-home');
+}
+
+function showSection(){
+  if(!CL) return;
+  const {lesson, sectionIdx, phase, quizIdx} = CL;
+  const color = lesson.color;
+  const area = document.getElementById('learnLessonArea');
+
+  // Header progress
+  const totalSteps = lesson.sections.length + lesson.quiz.length;
+  const doneSteps = (phase==='read'?sectionIdx:lesson.sections.length+quizIdx);
+  document.getElementById('learnBar').style.width = (doneSteps/totalSteps*100)+'%';
+
+  // QUIZ PHASE
+  if(phase==='quiz'){
+    const q = lesson.quiz[quizIdx];
+    const total = lesson.quiz.length;
+    area.innerHTML = `
+      <div style="text-align:center;margin-bottom:.5rem;">
+        <div style="display:inline-block;padding:.2rem .75rem;border-radius:99px;font-size:.72rem;
+          font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#fff;background:${color};">
+          Quiz final — ${quizIdx+1}/${total}
+        </div>
+      </div>
+      <div class="act-card" style="border-top:3px solid ${color};">
+        <div class="act-prompt" style="font-size:1.2rem;">${q.q}</div>
+      </div>
+      <div class="opts">
+        ${q.opts.map((o,i)=>`
+          <button class="opt" onclick="checkLearnQuiz(this,'${o.replace(/'/g,"\'")}','${q.correct.replace(/'/g,"\'")}')">
+            <span class="opt-letter">${'ABCD'[i]}</span>${o}
+          </button>`).join('')}
+      </div>`;
+    return;
+  }
+
+  // READ PHASE
+  const sec = lesson.sections[sectionIdx];
+  const isLast = sectionIdx >= lesson.sections.length-1;
+  let content = '';
+
+  if(sec.type==='intro'){
+    content = `
+      <div style="text-align:center;margin-bottom:1.25rem;">
+        <span style="font-size:3rem;">${lesson.icon}</span>
+        <h2 style="font-family:'Outfit',sans-serif;font-size:1.3rem;font-weight:800;margin-top:.5rem;">${sec.title}</h2>
+      </div>
+      <div style="background:${color}15;border-left:4px solid ${color};border-radius:0 var(--rs) var(--rs) 0;
+        padding:1rem 1.1rem;font-size:.95rem;line-height:1.75;color:var(--text);">
+        ${sec.text}
+      </div>`;
+  }
+
+  else if(sec.type==='alphabet'){
+    content = `
+      <h3 style="font-family:'Outfit',sans-serif;font-weight:800;margin-bottom:1rem;">${sec.title}</h3>
+      <div style="display:grid;gap:.45rem;">
+        ${sec.items.map(item=>`
+          <div style="display:flex;align-items:center;gap:.75rem;padding:.55rem .8rem;
+            background:var(--linen);border-radius:var(--rs);">
+            <span style="font-family:'Outfit',sans-serif;font-size:1.1rem;font-weight:900;
+              color:${color};min-width:70px;">${item.letter}</span>
+            <span style="font-size:.8rem;color:var(--muted);min-width:60px;">[${item.sound}]</span>
+            <span style="font-size:.8rem;font-weight:600;min-width:100px;">${item.example}</span>
+            <span style="font-size:.72rem;color:var(--muted);font-style:italic;">${item.note}</span>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  else if(sec.type==='numbers_grid'){
+    content = `
+      <h3 style="font-family:'Outfit',sans-serif;font-weight:800;margin-bottom:1rem;">${sec.title}</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.55rem;">
+        ${sec.items.map(item=>`
+          <div style="background:var(--linen);border-radius:var(--rs);padding:.65rem;text-align:center;">
+            <div style="font-family:'Outfit',sans-serif;font-size:1.5rem;font-weight:900;color:${color};">${item.num}</div>
+            <div style="font-weight:700;font-size:.88rem;margin-top:.15rem;">${item.ndau}</div>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  else if(sec.type==='table'){
+    content = `
+      <h3 style="font-family:'Outfit',sans-serif;font-weight:800;margin-bottom:.85rem;">${sec.title}</h3>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:320px;">
+          <thead><tr style="background:${color};">
+            ${sec.headers.map(h=>`<th style="padding:.55rem .75rem;text-align:left;color:#fff;font-size:.8rem;font-weight:700;">${h}</th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${sec.rows.map((row,i)=>`<tr style="background:${i%2?'var(--linen)':'var(--card)'};border-bottom:1px solid var(--border);">
+              ${row.map((cell,ci)=>`<td style="padding:.55rem .75rem;font-size:.85rem;${ci===0?`font-family:'Outfit',sans-serif;font-weight:800;color:${color};`:''}">${cell}</td>`).join('')}
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  else if(sec.type==='dialogue'){
+    content = `
+      <h3 style="font-family:'Outfit',sans-serif;font-weight:800;margin-bottom:.85rem;">${sec.title}</h3>
+      <div style="display:grid;gap:.5rem;">
+        ${sec.lines.map(line=>`
+          <div style="display:flex;gap:.6rem;align-items:flex-start;
+            ${line.speaker==='B'?'flex-direction:row-reverse;text-align:right;':''}">
+            <div style="min-width:28px;height:28px;border-radius:50%;background:${color};
+              display:flex;align-items:center;justify-content:center;
+              font-size:.72rem;font-weight:800;color:#fff;flex-shrink:0;">${line.speaker}</div>
+            <div style="background:${line.speaker==='A'?color+'15':'var(--linen)'};
+              border-radius:var(--rs);padding:.6rem .85rem;max-width:80%;">
+              <div style="font-family:'Outfit',sans-serif;font-weight:700;font-size:.95rem;">${line.line}</div>
+              <div style="font-size:.75rem;color:var(--muted);margin-top:.15rem;font-style:italic;">${line.pt}</div>
+            </div>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  else if(sec.type==='highlight'){
+    content = `
+      <div style="background:${color}10;border:1.5px solid ${color}40;border-radius:var(--r);padding:1.1rem;">
+        <h3 style="font-family:'Outfit',sans-serif;font-weight:800;color:${color};margin-bottom:.6rem;">${sec.title}</h3>
+        ${sec.text?`<p style="font-size:.88rem;margin-bottom:.75rem;line-height:1.7;">${sec.text}</p>`:''}
+        <div style="display:grid;gap:.4rem;">
+          ${sec.examples.map(ex=>`
+            <div style="background:var(--card);border-radius:var(--rs);padding:.55rem .8rem;
+              font-size:.88rem;font-weight:600;border-left:3px solid ${color};">${ex}</div>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  area.innerHTML = `
+    <div class="act-card" style="text-align:left;padding:1.25rem;">
+      ${content}
+    </div>
+    <button class="cont-btn" onclick="nextSection()" style="background:${color};">
+      ${isLast?'Fazer Quiz Final →':'Próxima →'}
+    </button>`;
+}
+
+function nextSection(){
+  if(!CL) return;
+  const {lesson} = CL;
+  CL.sectionIdx++;
+  if(CL.sectionIdx >= lesson.sections.length){
+    CL.phase = 'quiz';
+    CL.quizIdx = 0;
+  }
+  showSection();
+}
+
+function checkLearnQuiz(btn, answer, correct){
+  document.querySelectorAll('.opt').forEach(b=>b.disabled=true);
+  const isOk = answer===correct;
+  btn.classList.add(isOk?'correct':'wrong');
+  if(!isOk){
+    document.querySelectorAll('.opt').forEach(b=>{
+      if(b.textContent.includes(correct)) b.classList.add('correct');
+    });
+  } else { CL.score++; }
+
+  const fb = document.getElementById('fbBar');
+  fb.className = 'fb show '+(isOk?'ok':'err');
+  document.getElementById('fbMsg').textContent = isOk?'Correcto! ✓':'Errado';
+  document.getElementById('fbTxt').textContent = isOk?'':' Correcto: '+correct;
+  document.querySelector('.fb-btn').textContent =
+    CL.quizIdx >= CL.lesson.quiz.length-1 ? 'Ver resultado' : 'Continuar';
+  document.querySelector('.fb-btn').onclick = nextLearnQuiz;
+}
+
+function nextLearnQuiz(){
+  document.getElementById('fbBar').classList.remove('show');
+  CL.quizIdx++;
+  if(CL.quizIdx >= CL.lesson.quiz.length){
+    finishLearnLesson();
+  } else {
+    showSection();
+  }
+}
+
+function finishLearnLesson(){
+  const {lesson, score} = CL;
+  const total = lesson.quiz.length;
+  const pct = Math.round(score/total*100);
+  const passed = pct>=60;
+  const stars = pct>=90?3:pct>=70?2:pct>=60?1:0;
+  const xp = passed?Math.round(40*stars):0;
+  const color = lesson.color;
+
+  if(passed){
+    S.done_learn = S.done_learn||{};
+    S.done_learn[lesson.id] = {score:pct,stars,date:new Date().toISOString()};
+    S.xp=(S.xp||0)+xp;
+    save();
+  }
+
+  const lId = lesson.id;
+  CL=null;
+  document.getElementById('learnLessonArea').innerHTML=`
+    <div class="result">
+      <div class="result-ring ${passed?'pass':'fail'}">${passed?(stars===3?'🏆':stars===2?'⭐':'✓'):'✗'}</div>
+      <h2 style="font-family:'Outfit',sans-serif;font-size:1.5rem;font-weight:900;margin-bottom:.4rem;">
+        ${passed?'Lição completa!':'Tenta de novo!'}
+      </h2>
+      <div style="font-family:'Outfit',sans-serif;font-size:2.5rem;font-weight:900;
+        color:${passed?'var(--green)':'var(--red)'};margin:.4rem 0;">${pct}%</div>
+      ${passed?`<div style="font-size:.85rem;color:var(--gold);font-weight:700;margin-bottom:.75rem;">+${xp} XP · ${'⭐'.repeat(stars)+'☆'.repeat(3-stars)}</div>`:''}
+      <div style="display:grid;gap:.6rem;max-width:320px;margin:0 auto;">
+        <button class="cont-btn" style="background:${color};" onclick="openLesson('${lId}')">
+          Repetir lição
+        </button>
+        <button class="cont-btn" style="background:var(--green);" onclick="goPage('learn-home')">
+          ← Lições
+        </button>
+      </div>
+    </div>`;
+}
+
 // ── INIT ──
 renderHome();
 renderDict();
+renderLearnHome();
 </script>
 </body>
 </html>
